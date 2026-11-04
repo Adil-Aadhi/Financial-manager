@@ -1,7 +1,12 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { connection } from "next/server";
 
 export async function createClient() {
+    // Supabase auth checks session expiry with Date.now(). Under Cache Components that is a
+    // per-request value, so wait for a real request before any auth call. Cookies alone don't
+    // defer it (cookies are available during runtime prefetch). Auth data must never be prerendered.
+    await connection();
     const cookieStore = await cookies();
 
     return createServerClient(
