@@ -1,0 +1,285 @@
+@import "tailwindcss";
+
+/*
+ * ============================================================================
+ *  FinanceTracker — "Aurora Glass" design system
+ *  Single source of truth for colour, surface, radius, shadow and motion.
+ *  Read /DESIGN.md before adding UI. Never hard-code slate/zinc/hex colours in
+ *  components — use the semantic tokens below (bg-canvas, text-fg, glass ...).
+ * ============================================================================
+ */
+
+/* `dark:` follows the resolved theme on <html data-theme="dark">, which the
+   inline script in app/layout.tsx sets before first paint. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* ---------------------------------------------------------------- tokens -- */
+/* Default accent = emerald. The accent script/picker overrides these on <html style>. */
+:root {
+  --accent-h: 163;
+  --accent-c: 0.14;
+}
+
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  --canvas: #f3f5fa;
+  --canvas-deep: #e8ecf4;
+  --fg: #0b1220;
+  --fg-muted: #3f4a5c;
+  --fg-subtle: #667085;
+  --line: rgb(15 23 42 / 0.08);
+  --line-strong: rgb(15 23 42 / 0.15);
+
+  /* Apple-style materials: heavy blur + saturation, fill opaque enough for body text. */
+  --glass: rgb(255 255 255 / 0.62);
+  --glass-strong: rgb(255 255 255 / 0.76);
+  --glass-input: rgb(255 255 255 / 0.7);
+  --glass-hover: rgb(255 255 255 / 0.72);
+  --glass-edge: rgb(255 255 255 / 0.95);
+  --glass-blur: blur(44px) saturate(200%) brightness(1.05);
+  --glass-blur-strong: blur(64px) saturate(210%) brightness(1.07);
+
+  /* Accent is generated from one hue + chroma (set by the accent picker on <html>). */
+  --accent: oklch(0.58 var(--accent-c) var(--accent-h));
+  --accent-strong: oklch(0.5 var(--accent-c) var(--accent-h));
+  --accent-soft: oklch(0.95 calc(var(--accent-c) * 0.35) var(--accent-h));
+  --accent-2: oklch(0.6 calc(var(--accent-c) * 0.9) calc(var(--accent-h) - 28));
+  --accent-3: oklch(0.58 0.17 calc(var(--accent-h) + 45));
+  --accent-fg: #ffffff;
+
+  /* Money colours are fixed and do not follow the accent. */
+  --positive: #059669;
+  --danger: #dc2626;
+  --warning: #d97706;
+  --info: #2563eb;
+
+  --aurora-1: oklch(0.75 calc(var(--accent-c) * 1.1) var(--accent-h) / 0.32);
+  --aurora-2: oklch(0.7 0.14 calc(var(--accent-h) + 45) / 0.26);
+  --aurora-3: oklch(0.78 calc(var(--accent-c) * 0.9) calc(var(--accent-h) - 28) / 0.24);
+  --grid-line: rgb(15 23 42 / 0.045);
+
+  --shadow-glass:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.9),
+    0 1px 2px rgb(15 23 42 / 0.04),
+    0 24px 48px -16px rgb(15 23 42 / 0.14);
+  --shadow-glow: 0 10px 30px -10px oklch(0.58 var(--accent-c) var(--accent-h) / 0.55);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --canvas: #060911;
+  --canvas-deep: #03050a;
+  --fg: #eef2f8;
+  --fg-muted: #a9b2c2;
+  --fg-subtle: #7f8899;
+  --line: rgb(255 255 255 / 0.08);
+  --line-strong: rgb(255 255 255 / 0.15);
+
+  --glass: rgb(24 28 38 / 0.56);
+  --glass-strong: rgb(20 24 33 / 0.72);
+  --glass-input: rgb(255 255 255 / 0.05);
+  --glass-hover: rgb(255 255 255 / 0.07);
+  --glass-edge: rgb(255 255 255 / 0.16);
+  --glass-blur: blur(44px) saturate(190%);
+  --glass-blur-strong: blur(64px) saturate(200%);
+
+  --accent: oklch(0.77 var(--accent-c) var(--accent-h));
+  --accent-strong: oklch(0.69 var(--accent-c) var(--accent-h));
+  --accent-soft: oklch(0.7 var(--accent-c) var(--accent-h) / 0.14);
+  --accent-2: oklch(0.8 calc(var(--accent-c) * 0.85) calc(var(--accent-h) - 28));
+  --accent-3: oklch(0.72 0.14 calc(var(--accent-h) + 45));
+  --accent-fg: oklch(0.2 calc(var(--accent-c) * 0.4) var(--accent-h));
+
+  --positive: #34d399;
+  --danger: #f87171;
+  --warning: #fbbf24;
+  --info: #60a5fa;
+
+  --aurora-1: oklch(0.65 var(--accent-c) var(--accent-h) / 0.3);
+  --aurora-2: oklch(0.55 0.18 calc(var(--accent-h) + 45) / 0.26);
+  --aurora-3: oklch(0.7 calc(var(--accent-c) * 0.9) calc(var(--accent-h) - 28) / 0.18);
+  --grid-line: rgb(255 255 255 / 0.035);
+
+  --shadow-glass:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.07),
+    0 1px 2px rgb(0 0 0 / 0.3),
+    0 30px 60px -20px rgb(0 0 0 / 0.7);
+  --shadow-glow: 0 10px 34px -10px oklch(0.77 var(--accent-c) var(--accent-h) / 0.6);
+}
+
+/* Map raw tokens to Tailwind utilities: bg-canvas, text-fg, border-line ... */
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-canvas-deep: var(--canvas-deep);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-glass: var(--glass);
+  --color-glass-strong: var(--glass-strong);
+  --color-glass-input: var(--glass-input);
+  --color-glass-hover: var(--glass-hover);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-2: var(--accent-2);
+  --color-accent-3: var(--accent-3);
+  --color-accent-fg: var(--accent-fg);
+  --color-positive: var(--positive);
+  --color-danger: var(--danger);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  --shadow-glass: var(--shadow-glass);
+  --shadow-glow: var(--shadow-glow);
+
+  --animate-rise: rise 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-fade: fade 0.4s ease-out both;
+  --animate-aurora: aurora 22s ease-in-out infinite alternate;
+  --animate-float: float 7s ease-in-out infinite;
+  --animate-shake: shake 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(14px) scale(0.985); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes aurora {
+    0% { transform: translate3d(0, 0, 0) scale(1); }
+    50% { transform: translate3d(4%, -3%, 0) scale(1.08); }
+    100% { transform: translate3d(-3%, 4%, 0) scale(0.96); }
+  }
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+  }
+  @keyframes shake {
+    10%, 90% { transform: translateX(-1px); }
+    20%, 80% { transform: translateX(2px); }
+    30%, 50%, 70% { transform: translateX(-4px); }
+    40%, 60% { transform: translateX(4px); }
+  }
+}
+
+/* ------------------------------------------------------------- surfaces -- */
+
+/* Standard translucent panel (cards, chips, nav). */
+@utility glass {
+  background-color: var(--glass);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-glass);
+  /* Single declaration on purpose: Lightning CSS drops the pair when both use var(). */
+  backdrop-filter: var(--glass-blur);
+}
+
+/* Denser panel for primary content: auth card, modals, sheets. */
+@utility glass-strong {
+  background-color: var(--glass-strong);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-glass);
+  /* Single declaration on purpose: Lightning CSS drops the pair when both use var(). */
+  backdrop-filter: var(--glass-blur-strong);
+}
+
+/* Light-catching 1px gradient rim. Add alongside glass / glass-strong.
+   The element must not rely on its own ::before. */
+@utility glass-edge {
+  position: relative;
+  isolation: isolate;
+  &::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      160deg,
+      var(--glass-edge),
+      transparent 35%,
+      transparent 70%,
+      color-mix(in oklab, var(--accent) 35%, transparent)
+    );
+    mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    pointer-events: none;
+    z-index: -1;
+  }
+}
+
+/* Brand gradient text for hero headlines and big numbers. */
+@utility text-gradient {
+  background-image: linear-gradient(110deg, var(--accent) 0%, var(--accent-2) 45%, var(--accent-3) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Brand gradient fill (primary buttons, logo mark, progress). */
+@utility bg-brand {
+  background-image: linear-gradient(135deg, var(--accent-strong) 0%, var(--accent) 50%, var(--accent-2) 100%);
+}
+
+/* --------------------------------------------------------------- base -- */
+@layer base {
+  html {
+    background-color: var(--canvas);
+  }
+
+  /* body stays transparent so fixed -z-10 layers (AuroraBackground) show through. */
+  body {
+    color: var(--fg);
+    font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+
+  ::selection {
+    background-color: color-mix(in oklab, var(--accent) 30%, transparent);
+  }
+
+  :focus-visible {
+    outline: 2px solid color-mix(in oklab, var(--accent) 70%, transparent);
+    outline-offset: 2px;
+  }
+
+  /* Tame browser autofill so it doesn't paint a yellow/blue slab on glass. */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus {
+    -webkit-text-fill-color: var(--fg);
+    caret-color: var(--fg);
+    transition: background-color 9999s ease-out 0s;
+  }
+}
+
+/* No blur support, or the user asked for less transparency: use near-solid panels. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  [data-theme="light"] { --glass: rgb(255 255 255 / 0.92); --glass-strong: rgb(255 255 255 / 0.96); }
+  [data-theme="dark"] { --glass: rgb(22 26 35 / 0.94); --glass-strong: rgb(18 22 30 / 0.97); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  [data-theme="light"] { --glass: rgb(255 255 255 / 0.94); --glass-strong: rgb(255 255 255 / 0.97); }
+  [data-theme="dark"] { --glass: rgb(22 26 35 / 0.95); --glass-strong: rgb(18 22 30 / 0.98); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
