@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { setActiveOwnerId } from "@/lib/offline/activeOwner";
 import { ensureOfflineBootstrap, OFFLINE_DATA_STALE_EVENT } from "@/lib/offline/bootstrap";
 import { useOnlineStatus } from "@/lib/offline/useOnlineStatus";
 
@@ -22,6 +23,11 @@ function refresh(ownerId: string, force: boolean, label: string) {
  */
 export function useOfflineRefresh(ownerId: string, serverVersion: string, label: string) {
   const isOnline = useOnlineStatus();
+
+  // Local-first mutations use this to know whose data the page shows (see activeOwner.ts).
+  useEffect(() => {
+    setActiveOwnerId(ownerId);
+  }, [ownerId]);
 
   useEffect(() => {
     if (!isOnline) return;

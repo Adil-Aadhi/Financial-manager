@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { CalendarDays, Pencil, Search, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { deleteTransactionAction } from "@/app/actions/transactions";
 import { markOfflineDataStale } from "@/lib/offline/bootstrap";
+import { deleteTransactionLocally, runMutation } from "@/lib/offline/mutations";
 import { CategoryTile } from "@/components/categories/CategoryIcon";
 import { QuickTransactionModal } from "@/components/transactions/QuickTransactionModal";
 import { Alert } from "@/components/ui/Alert";
@@ -388,7 +389,9 @@ export function TransactionHistory({
           transaction={deletingTransaction}
           currency={currency}
           onClose={() => setDeletingTransaction(null)}
-          onDeleted={() => setMessage("Transaction deleted.")}
+          onDeleted={(queued) =>
+            setMessage(queued ? "Transaction deleted on this device. It will sync later." : "Transaction deleted.")
+          }
         />
       )}
     </>
@@ -463,7 +466,7 @@ function DeleteTransactionModal({
   transaction: TransactionRecord;
   currency: SupportedCurrency;
   onClose: () => void;
-  onDeleted: () => void;
+  onDeleted: (queued: boolean) => void;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -472,14 +475,18 @@ function DeleteTransactionModal({
   const handleDelete = () => {
     setError(null);
     startTransition(async () => {
-      const result = await deleteTransactionAction(transaction.id);
+      const result = await runMutation({
+        local: (ownerId) => deleteTransactionLocally(ownerId, transaction.id),
+        remote: () => deleteTransactionAction(transaction.id),
+      });
       if (!result.success) {
         setError(result.error ?? "Unable to delete this transaction.");
         return;
       }
-      markOfflineDataStale();
       onClose();
-      onDeleted();
+      onDeleted(result.queued);
+      if (result.queued) return;
+      markOfflineDataStale();
       router.refresh();
     });
   };

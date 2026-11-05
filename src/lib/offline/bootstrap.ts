@@ -226,8 +226,14 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
       offlineDb.transactions,
       offlineDb.monthlyBudgets,
       offlineDb.syncMeta,
+      offlineDb.outbox,
     ],
     async () => {
+      // Checked inside the same transaction as the overwrite, so a change saved on this
+      // device while the snapshot was downloading can never be replaced by it.
+      const kept = await keepLocalChanges(ownerId);
+      if (kept) return kept;
+
       await Promise.all([
         offlineDb.accounts.where("ownerId").equals(ownerId).delete(),
         offlineDb.categories.where("ownerId").equals(ownerId).delete(),
@@ -280,7 +286,24 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
   );
 }
 
+/**
+ * A snapshot replaces every local row for the owner. While the outbox holds changes that
+ * Supabase hasn't received, that would erase them, so the refresh keeps the local copy
+ * instead. Phase 2's sync engine empties the outbox first; refreshes then resume as before.
+ */
+async function keepLocalChanges(ownerId: string): Promise<LocalSyncMeta | null> {
+  const unsynced = await offlineDb.outbox.where("ownerId").equals(ownerId).count();
+  if (unsynced === 0) return null;
+  const meta = await offlineDb.syncMeta.get(ownerId);
+  if (!meta) throw new Error("Unsynced changes exist without a local snapshot.");
+  return meta;
+}
+
 async function runBootstrap(expectedUserId: string) {
+  // Skip the download entirely while local changes are waiting; see keepLocalChanges().
+  const kept = await keepLocalChanges(expectedUserId);
+  if (kept) return kept;
+
   const supabase = createClient();
   const { data, error } = await supabase.auth.getUser();
   if (error || !data.user || data.user.id !== expectedUserId) {

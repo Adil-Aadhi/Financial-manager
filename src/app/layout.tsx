@@ -6,6 +6,7 @@ import { accentInitScript } from "@/components/theme/accent";
 import { timeZoneCookieScript } from "@/lib/month";
 import { OfflineDataProvider } from "@/components/offline/OfflineDataProvider";
 import { ServiceWorkerRegistration } from "@/components/pwa/ServiceWorkerRegistration";
+import { PendingChangesNotice } from "@/components/offline/PendingChangesNotice";
 import { PerfOverlay } from "@/components/perf/PerfOverlay";
 import "./globals.css";
 
@@ -67,6 +68,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <ThemeProvider>
           <OfflineDataProvider>{children}</OfflineDataProvider>
           <ServiceWorkerRegistration />
+          <PendingChangesNotice />
           {/* TEMPORARY (Step 3 Phase 0): renders nothing unless localStorage.ftPerf === "1". */}
           <PerfOverlay />
         </ThemeProvider>

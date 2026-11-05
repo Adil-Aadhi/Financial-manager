@@ -75,6 +75,37 @@ export interface LocalSyncMeta {
   totalsMatch: boolean;
 }
 
+export type OutboxEntity = "transaction" | "account" | "category" | "budget";
+export type OutboxOperation = "CREATE" | "UPDATE" | "DELETE";
+/** Phase 1 only writes "pending". Phase 2's sync engine moves ops through the others. */
+export type OutboxStatus = "pending" | "syncing" | "failed";
+
+/**
+ * One change made on this device that Supabase has not received yet. Rows are applied to the
+ * local tables immediately; this queue is what Phase 2 will replay against Supabase, in `seq`
+ * order. Only the sync engine (after the server confirms) may delete an entry.
+ */
+export interface OutboxEntry {
+  /** Auto-increment: replay order. */
+  seq?: number;
+  /** Stable unique id for this operation (idempotency key for Phase 2). */
+  opId: string;
+  ownerId: string;
+  entity: OutboxEntity;
+  /** The record's id. Locally created records use a client UUID that becomes the server id. */
+  entityId: string;
+  op: OutboxOperation;
+  /** Server column values to write (CREATE/UPDATE) or the identifying fields (DELETE). */
+  payload: Record<string, unknown>;
+  /** The record's updated_at before this device first changed it (for conflict checks later). */
+  baseUpdatedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  status: OutboxStatus;
+  attempts: number;
+  error: string | null;
+}
+
 class FinanceOfflineDatabase extends Dexie {
   profiles!: EntityTable<LocalProfile, "ownerId">;
   accounts!: Table<LocalAccount, [string, string]>;
@@ -82,6 +113,7 @@ class FinanceOfflineDatabase extends Dexie {
   transactions!: Table<LocalTransaction, [string, string]>;
   monthlyBudgets!: EntityTable<LocalMonthlyBudget, "ownerId">;
   syncMeta!: EntityTable<LocalSyncMeta, "ownerId">;
+  outbox!: EntityTable<OutboxEntry, "seq">;
 
   constructor() {
     super("finance-tracker-offline");
@@ -93,6 +125,10 @@ class FinanceOfflineDatabase extends Dexie {
         "&[ownerId+id], ownerId, [ownerId+account_id], [ownerId+category_id], [ownerId+transaction_date], [ownerId+account_id+transaction_date], [ownerId+type+transaction_date]",
       monthlyBudgets: "&ownerId, id",
       syncMeta: "&ownerId, completedAt",
+    });
+    // v2 only adds the outbox; existing tables and rows are kept as they are.
+    this.version(2).stores({
+      outbox: "++seq, &opId, ownerId, [ownerId+entity+entityId], [ownerId+status]",
     });
   }
 }

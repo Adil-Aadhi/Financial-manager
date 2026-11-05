@@ -14,8 +14,7 @@ export function AddCategoryButton() {
       size="sm"
       leftIcon={<Plus className="h-4 w-4" />}
       onClick={openAddCategory}
-      disabled={!isOnline}
-      title={isOnline ? undefined : "Connect to the internet to add a category"}
+      title={isOnline ? undefined : "Saved on this device and synced later"}
     >
       Add Category
     </Button>

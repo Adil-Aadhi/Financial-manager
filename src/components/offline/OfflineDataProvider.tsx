@@ -5,6 +5,7 @@ import { liveQuery, type Subscription } from "dexie";
 import { ensureOfflineBootstrap } from "@/lib/offline/bootstrap";
 import { createClient } from "@/lib/supabase/client";
 import { offlineDb } from "@/lib/offline/db";
+import { setActiveOwnerId } from "@/lib/offline/activeOwner";
 
 // Keep this in sync with public/sw.js. A new worker version gets one fresh route-warm
 // signature without permanently disabling future warming.
@@ -122,6 +123,8 @@ export function OfflineDataProvider({ children }: { children: React.ReactNode })
         void bootstrap(session.user.id);
       }
       if (event === "SIGNED_OUT") {
+        // Queued offline changes stay in IndexedDB under their owner; they're just not shown.
+        setActiveOwnerId(null);
         authenticatedUserId = null;
         accountRouteSubscription?.unsubscribe();
         accountRouteSubscription = null;

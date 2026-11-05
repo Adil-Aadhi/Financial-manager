@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Calendar, Clock3, RotateCcw, Trash2 } from "lucide-react";
 import { restoreAccountAction } from "@/app/actions/accounts";
 import { markOfflineDataStale } from "@/lib/offline/bootstrap";
+import { restoreAccountLocally, runMutation } from "@/lib/offline/mutations";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -43,15 +44,14 @@ export function AccountTrashList({
   }, []);
 
   const restoreAccount = (accountId: string) => {
-    if (!isOnline) {
-      setError("Connect to the internet to restore this account.");
-      return;
-    }
     setError(null);
     setRestoringId(accountId);
 
     startTransition(async () => {
-      const result = await restoreAccountAction(accountId);
+      const result = await runMutation({
+        local: (ownerId) => restoreAccountLocally(ownerId, accountId),
+        remote: () => restoreAccountAction(accountId),
+      });
 
       if (!result.success) {
         setError(result.error || "Unable to restore this account.");
@@ -60,6 +60,7 @@ export function AccountTrashList({
       }
 
       setRestoringId(null);
+      if (result.queued) return; // Restored on this device; it syncs later.
       markOfflineDataStale();
       router.refresh();
     });
@@ -85,7 +86,7 @@ export function AccountTrashList({
       )}
 
       {!isOnline && (
-        <Alert variant="info">You can review Trash offline. Restoring requires an internet connection.</Alert>
+        <Alert variant="info">You are offline. Restored accounts are saved on this device and sync later.</Alert>
       )}
 
       {accounts.map((account) => {
@@ -174,7 +175,7 @@ export function AccountTrashList({
               size="sm"
               leftIcon={<RotateCcw className="h-3.5 w-3.5" />}
               isLoading={isPending && restoringId === account.id}
-              disabled={!isOnline || isPending || now === null || isExpired}
+              disabled={isPending || now === null || isExpired}
               onClick={() => restoreAccount(account.id)}
               className="w-full shrink-0 sm:w-auto"
             >
