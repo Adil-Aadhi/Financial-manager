@@ -1,12 +1,11 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { Landmark } from "lucide-react";
 import { AddAccountButton } from "@/components/accounts/AddAccountButton";
-import { AccountList, type AccountListItem } from "@/components/accounts/AccountList";
+import type { AccountListItem } from "@/components/accounts/AccountList";
+import { OfflineAccountList } from "@/components/accounts/OfflineAccountList";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
 import { Alert } from "@/components/ui/Alert";
 import { Card } from "@/components/ui/Card";
-import { EmptyState } from "@/components/ui/EmptyState";
 import { getAuthenticatedUserProfile } from "@/lib/supabase/profile";
 import { createClient } from "@/lib/supabase/server";
 
@@ -96,19 +95,12 @@ export default async function TransactionsPage() {
         )}
 
         <Card title="Accounts" description="Balances are calculated from transaction history." bodyClassName="pt-2">
-          {accountItems.length > 0 ? (
-            <AccountList
-              accounts={accountItems}
-              fallbackCurrency={profile.default_currency}
-              actionsEnabled={accountTrashReady}
-            />
-          ) : (
-            <EmptyState
-              icon={<Landmark className="h-5 w-5" />}
-              title="No accounts yet"
-              description="Add an account before recording transactions."
-            />
-          )}
+          <OfflineAccountList
+            ownerId={user.id}
+            serverAccounts={accountItems}
+            fallbackCurrency={profile.default_currency}
+            actionsEnabled={accountTrashReady}
+          />
         </Card>
       </div>
     </AppShell>

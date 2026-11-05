@@ -14,6 +14,8 @@
     "@supabase/supabase-js": "^2.119.0",
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",
+    "dexie": "4.4.7",
+    "dexie-react-hooks": "4.4.0",
     "idb": "^8.0.4",
     "lucide-react": "^1.69.0",
     "next": "16.4.5",
