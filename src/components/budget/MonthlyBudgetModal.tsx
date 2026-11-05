@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { AlertCircle, Trash2 } from "lucide-react";
 import { deleteMonthlyBudgetAction, saveMonthlyBudgetAction } from "@/app/actions/budget";
 import { markOfflineDataStale } from "@/lib/offline/bootstrap";
+import { deleteBudgetLocally, runMutation, saveBudgetLocally } from "@/lib/offline/mutations";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
@@ -58,10 +59,6 @@ export function MonthlyBudgetModal({
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (isPending) return;
-    if (!isOnline) {
-      setError("Connect to the internet to save your budget.");
-      return;
-    }
     setError(null);
 
     if (!amount.trim()) {
@@ -76,33 +73,37 @@ export function MonthlyBudgetModal({
     }
 
     startTransition(async () => {
-      const result = await saveMonthlyBudgetAction(value);
+      const result = await runMutation({
+        local: (ownerId) => saveBudgetLocally(ownerId, value),
+        remote: () => saveMonthlyBudgetAction(value),
+      });
       if (!result.success) {
         setError(result.error ?? "Unable to save your budget.");
         return;
       }
-      markOfflineDataStale();
       onClose();
+      if (result.queued) return; // Saved on this device; Home reads it from IndexedDB.
+      markOfflineDataStale();
       router.refresh();
     });
   };
 
   const handleRemove = () => {
     if (isPending) return;
-    if (!isOnline) {
-      setError("Connect to the internet to remove your budget.");
-      return;
-    }
     setError(null);
     startTransition(async () => {
-      const result = await deleteMonthlyBudgetAction();
+      const result = await runMutation({
+        local: (ownerId) => deleteBudgetLocally(ownerId),
+        remote: () => deleteMonthlyBudgetAction(),
+      });
       if (!result.success) {
         setError(result.error ?? "Unable to remove your budget.");
         setIsConfirmingRemove(false);
         return;
       }
-      markOfflineDataStale();
       onClose();
+      if (result.queued) return;
+      markOfflineDataStale();
       router.refresh();
     });
   };
@@ -117,7 +118,7 @@ export function MonthlyBudgetModal({
         size="sm"
       >
         <div className="space-y-4">
-          {!isOnline && <Alert variant="info">Removing a budget requires an internet connection.</Alert>}
+          {!isOnline && <Alert variant="info">You are offline. Removing the budget is saved on this device and syncs later.</Alert>}
           <div className="flex items-center justify-between gap-3 rounded-2xl border border-danger/25 bg-danger/8 p-3.5">
             <span className="text-sm font-medium text-fg-muted">Current limit</span>
             <span className="font-money text-base font-bold text-fg">
@@ -138,7 +139,7 @@ export function MonthlyBudgetModal({
               size="lg"
               onClick={handleRemove}
               isLoading={isPending}
-              disabled={!isOnline}
+              disabled={isPending}
             >
               {isPending ? "Removing…" : "Remove"}
             </Button>
@@ -162,7 +163,7 @@ export function MonthlyBudgetModal({
             {error}
           </Alert>
         )}
-        {!isOnline && <Alert variant="info">Budget changes require an internet connection.</Alert>}
+        {!isOnline && <Alert variant="info">You are offline. Budget changes are saved on this device and sync later.</Alert>}
 
         <div className="rounded-2xl border border-line bg-glass-hover px-4 pb-4 pt-3 text-center">
           <div className="flex items-center justify-between">
@@ -186,7 +187,7 @@ export function MonthlyBudgetModal({
                 setAmount(sanitizeAmount(event.target.value));
                 setFieldError(null);
               }}
-              disabled={isPending || !isOnline}
+              disabled={isPending}
               autoFocus
               aria-invalid={Boolean(fieldError)}
               aria-describedby={fieldError ? "budget-amount-error" : undefined}
@@ -210,7 +211,7 @@ export function MonthlyBudgetModal({
           size="lg"
           className="w-full"
           isLoading={isPending}
-          disabled={!isOnline}
+          disabled={isPending}
         >
           {isPending ? "Saving…" : isEditing ? "Save changes" : "Set budget"}
         </Button>
@@ -222,7 +223,7 @@ export function MonthlyBudgetModal({
               setError(null);
               setIsConfirmingRemove(true);
             }}
-            disabled={isPending || !isOnline}
+            disabled={isPending}
             className="mx-auto flex cursor-pointer items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-danger transition-colors hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Trash2 className="h-3.5 w-3.5" />

@@ -20,6 +20,12 @@ import {
 } from "@/lib/categories";
 import { cn } from "@/lib/cn";
 import { markOfflineDataStale } from "@/lib/offline/bootstrap";
+import {
+  createCategoryLocally,
+  deleteCategoryLocally,
+  runMutation,
+  updateCategoryLocally,
+} from "@/lib/offline/mutations";
 import { useOnlineStatus } from "@/lib/offline/useOnlineStatus";
 
 interface CategoryFormModalProps {
@@ -61,10 +67,6 @@ export function CategoryFormModal({
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!isOnline) {
-      setError("Connect to the internet to save category changes.");
-      return;
-    }
     setError(null);
     setNameError(null);
 
@@ -81,16 +83,18 @@ export function CategoryFormModal({
         type,
         icon,
       };
-      const result = isEditing
-        ? await updateCategoryAction(input)
-        : await createCategoryAction(input);
+      const result = await runMutation({
+        local: (ownerId) =>
+          isEditing ? updateCategoryLocally(ownerId, input) : createCategoryLocally(ownerId, input),
+        remote: () => (isEditing ? updateCategoryAction(input) : createCategoryAction(input)),
+      });
 
       if (!result.success) {
         setError(result.error ?? "Unable to save this category.");
         return;
       }
 
-      markOfflineDataStale();
+      if (!result.queued) markOfflineDataStale();
       if (!isEditing) {
         setName("");
         setType("income");
@@ -120,7 +124,7 @@ export function CategoryFormModal({
         )}
 
         {!isOnline && (
-          <Alert variant="info">Category changes require an internet connection.</Alert>
+          <Alert variant="info">You are offline. Category changes are saved on this device and sync later.</Alert>
         )}
 
         <Input
@@ -132,7 +136,7 @@ export function CategoryFormModal({
           }}
           error={nameError ?? undefined}
           maxLength={50}
-          disabled={isPending || !isOnline}
+          disabled={isPending}
           required
           autoFocus
         />
@@ -145,7 +149,7 @@ export function CategoryFormModal({
                 key={option}
                 type="button"
                 onClick={() => setType(option)}
-                disabled={isPending || !isOnline}
+                disabled={isPending}
                 aria-pressed={type === option}
                 className={cn(
                   "h-10 cursor-pointer rounded-lg text-xs font-semibold capitalize transition-colors disabled:cursor-not-allowed disabled:opacity-60",
@@ -170,7 +174,7 @@ export function CategoryFormModal({
                 key={option.value}
                 type="button"
                 onClick={() => setIcon(option.value)}
-                disabled={isPending || !isOnline}
+                disabled={isPending}
                 aria-label={option.label}
                 aria-pressed={icon === option.value}
                 title={option.label}
@@ -195,7 +199,7 @@ export function CategoryFormModal({
           <Button type="button" variant="ghost" onClick={closeAndReset} disabled={isPending}>
             Cancel
           </Button>
-          <Button type="submit" isLoading={isPending} disabled={!isOnline}>
+          <Button type="submit" isLoading={isPending} disabled={isPending}>
             {isPending ? "Saving…" : isEditing ? "Save Changes" : "Add Category"}
           </Button>
         </div>
@@ -218,18 +222,17 @@ export function DeleteCategoryModal({
   const isOnline = useOnlineStatus();
 
   const handleDelete = () => {
-    if (!isOnline) {
-      setError("Connect to the internet to delete this category.");
-      return;
-    }
     setError(null);
     startTransition(async () => {
-      const result = await deleteCategoryAction(category.id);
+      const result = await runMutation({
+        local: (ownerId) => deleteCategoryLocally(ownerId, category.id),
+        remote: () => deleteCategoryAction(category.id),
+      });
       if (!result.success) {
         setError(result.error ?? "Unable to delete this category.");
         return;
       }
-      markOfflineDataStale();
+      if (!result.queued) markOfflineDataStale();
       onClose();
     });
   };
@@ -250,7 +253,7 @@ export function DeleteCategoryModal({
         )}
 
         {!isOnline && (
-          <Alert variant="info">Deleting a category requires an internet connection.</Alert>
+          <Alert variant="info">You are offline. The deletion is saved on this device and syncs later.</Alert>
         )}
 
         <div className="flex items-start gap-3 rounded-2xl border border-danger/25 bg-danger/8 p-4">
@@ -274,7 +277,7 @@ export function DeleteCategoryModal({
             variant="danger"
             onClick={handleDelete}
             isLoading={isPending}
-            disabled={!isOnline}
+            disabled={isPending}
           >
             {isPending ? "Deleting…" : "Delete Category"}
           </Button>

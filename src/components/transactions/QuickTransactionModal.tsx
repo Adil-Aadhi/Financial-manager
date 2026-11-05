@@ -18,7 +18,15 @@ import {
   updateTransactionAction,
 } from "@/app/actions/transactions";
 import { CategoryTile } from "@/components/categories/CategoryIcon";
+import { getActiveOwnerId } from "@/lib/offline/activeOwner";
 import { markOfflineDataStale } from "@/lib/offline/bootstrap";
+import {
+  createTransactionLocally,
+  loadLocalTransactionOptions,
+  runMutation,
+  shouldWriteLocally,
+  updateTransactionLocally,
+} from "@/lib/offline/mutations";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
@@ -153,7 +161,27 @@ export function QuickTransactionModal({
 
   useEffect(() => {
     let cancelled = false;
-    getTransactionFormOptionsAction().then((result) => {
+    // Offline (or with changes still queued) the options come from this device, so the form
+    // also offers accounts and categories created offline. Online it uses the server as before.
+    const loadOptions = async () => {
+      const ownerId = getActiveOwnerId();
+      if (ownerId && (await shouldWriteLocally(ownerId))) {
+        try {
+          return { success: true, options: await loadLocalTransactionOptions(ownerId) };
+        } catch (localError) {
+          return {
+            success: false,
+            error: localError instanceof Error ? localError.message : "Unable to load the transaction form.",
+          };
+        }
+      }
+      return getTransactionFormOptionsAction().catch(() => ({
+        success: false,
+        error: "Couldn't reach the server. Check your connection and try again.",
+        options: undefined,
+      }));
+    };
+    void loadOptions().then((result) => {
       if (cancelled) return;
       if (!result.success || !result.options) {
         setError(result.error ?? "Unable to load the transaction form.");
@@ -221,18 +249,22 @@ export function QuickTransactionModal({
         transactionTime,
         remark,
       };
-      const result = isEditing
-        ? await updateTransactionAction(input)
-        : await createTransactionAction(input);
+      const result = await runMutation({
+        local: (ownerId) =>
+          isEditing ? updateTransactionLocally(ownerId, input) : createTransactionLocally(ownerId, input),
+        remote: () => (isEditing ? updateTransactionAction(input) : createTransactionAction(input)),
+      });
 
       if (!result.success) {
         setError(result.error ?? "Unable to save this transaction.");
         return;
       }
 
-      markOfflineDataStale();
-      onSaved?.(isEditing ? "Transaction updated." : "Transaction added.");
+      const saved = isEditing ? "Transaction updated" : "Transaction added";
+      onSaved?.(result.queued ? `${saved} on this device. It will sync later.` : `${saved}.`);
       onClose();
+      if (result.queued) return; // IndexedDB already shows it; there is no server change to fetch.
+      markOfflineDataStale();
       router.refresh();
     });
   };

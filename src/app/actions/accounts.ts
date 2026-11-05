@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { ACCOUNT_RESTORE_WINDOW_MS, accountFieldsError } from "@/lib/validation/rules";
 
 export interface CreateAccountInput {
   name: string;
@@ -31,7 +32,7 @@ export interface AccountActionResult {
   error?: string;
 }
 
-const TEN_DAYS_IN_MS = 10 * 24 * 60 * 60 * 1000;
+const TEN_DAYS_IN_MS = ACCOUNT_RESTORE_WINDOW_MS;
 
 function revalidateAccountViews(accountId?: string) {
   revalidatePath("/transactions");
@@ -112,12 +113,12 @@ export async function updateAccountAction({
   }
 
   const trimmedName = name.trim();
-  if (!accountId || !trimmedName) {
+  if (!accountId) {
     return { success: false, error: "Account Name is required." };
   }
-
-  if (!Number.isFinite(openingAmount)) {
-    return { success: false, error: "Enter a valid opening amount." };
+  const fieldsError = accountFieldsError(name, openingAmount);
+  if (fieldsError) {
+    return { success: false, error: fieldsError };
   }
 
   const { data, error } = await supabase

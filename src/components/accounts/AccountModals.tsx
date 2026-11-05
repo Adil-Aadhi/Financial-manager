@@ -8,6 +8,7 @@ import {
 } from "@/app/actions/accounts";
 import type { AccountListItem } from "@/components/accounts/AccountList";
 import { markOfflineDataStale } from "@/lib/offline/bootstrap";
+import { runMutation, trashAccountLocally, updateAccountLocally } from "@/lib/offline/mutations";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -48,10 +49,10 @@ export function EditAccountModal({
     }
 
     startTransition(async () => {
-      const result = await updateAccountAction({
-        accountId: account.id,
-        name: trimmedName,
-        openingAmount: parsedAmount,
+      const input = { accountId: account.id, name: trimmedName, openingAmount: parsedAmount };
+      const result = await runMutation({
+        local: (ownerId) => updateAccountLocally(ownerId, input),
+        remote: () => updateAccountAction(input),
       });
 
       if (!result.success) {
@@ -59,7 +60,7 @@ export function EditAccountModal({
         return;
       }
 
-      markOfflineDataStale();
+      if (!result.queued) markOfflineDataStale();
       onClose();
     });
   };
@@ -147,14 +148,17 @@ export function DeleteAccountModal({
     }
 
     startTransition(async () => {
-      const result = await trashAccountAction(account.id, confirmation);
+      const result = await runMutation({
+        local: (ownerId) => trashAccountLocally(ownerId, account.id, confirmation),
+        remote: () => trashAccountAction(account.id, confirmation),
+      });
 
       if (!result.success) {
         setError(result.error || "Unable to move this account to Trash.");
         return;
       }
 
-      markOfflineDataStale();
+      if (!result.queued) markOfflineDataStale();
       onClose();
     });
   };

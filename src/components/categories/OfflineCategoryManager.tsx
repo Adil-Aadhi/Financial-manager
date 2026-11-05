@@ -55,13 +55,13 @@ export function OfflineCategoryManager({
   return (
     <div className="space-y-4">
       {!isOnline && (
-        <Alert variant="info" title="Viewing saved categories">
-          Connect to the internet to add, edit, or delete categories.
+        <Alert variant="info" title="You are offline">
+          Category changes are saved on this device and sync later.
         </Alert>
       )}
       <CategoryManager
         categories={localCategories ?? serverCategories}
-        mutationsEnabled={isOnline}
+        mutationsEnabled
       />
     </div>
   );

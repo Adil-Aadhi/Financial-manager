@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
 import { createAccountAction } from "@/app/actions/accounts";
 import { markOfflineDataStale } from "@/lib/offline/bootstrap";
+import { createAccountLocally, runMutation } from "@/lib/offline/mutations";
 
 export interface AddAccountModalProps {
   isOpen: boolean;
@@ -54,18 +55,28 @@ export function AddAccountModal({
 
     startTransition(async () => {
       const parsedAmount = parseFloat(startingAmount) || 0;
-      const res = await createAccountAction({
-        name: trimmed,
-        startingAmount: parsedAmount,
+      const input = { name: trimmed, startingAmount: parsedAmount };
+      let created: { id: string; name: string } | undefined;
+      const res = await runMutation({
+        local: (ownerId) => createAccountLocally(ownerId, input),
+        remote: async () => {
+          const result = await createAccountAction(input);
+          created = result.account;
+          return result;
+        },
       });
 
       if (!res.success) {
         setError(res.error || "Failed to create account. Please try again.");
       } else {
-        markOfflineDataStale();
-        setSuccessMessage(`Account "${trimmed}" created successfully.`);
-        if (onSuccess && res.account) {
-          onSuccess(res.account);
+        if (!res.queued) markOfflineDataStale();
+        setSuccessMessage(
+          res.queued
+            ? `Account "${trimmed}" saved on this device. It will sync later.`
+            : `Account "${trimmed}" created successfully.`
+        );
+        if (onSuccess && created) {
+          onSuccess(created);
         }
         setTimeout(() => {
           handleModalClose();

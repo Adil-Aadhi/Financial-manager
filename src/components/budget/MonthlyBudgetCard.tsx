@@ -70,8 +70,7 @@ export function MonthlyBudgetCard({
             size="sm"
             className="h-8 gap-1 px-2.5"
             onClick={() => setIsModalOpen(true)}
-            disabled={!isOnline}
-            title={isOnline ? undefined : "Connect to the internet to edit the budget"}
+            title={isOnline ? undefined : "Changes are saved on this device and synced later"}
             aria-label="Edit budget"
           >
             <Pencil className="h-3.5 w-3.5" />
@@ -96,7 +95,7 @@ export function MonthlyBudgetCard({
             Budgets need a database update. Run the monthly-budget migration to turn them on.
           </p>
         ) : limit === null ? (
-          <EmptyBudget onSet={() => setIsModalOpen(true)} enabled={isOnline} />
+          <EmptyBudget onSet={() => setIsModalOpen(true)} enabled />
         ) : (
           <BudgetDetails
             limit={limit}
@@ -107,7 +106,7 @@ export function MonthlyBudgetCard({
         )}
         {available && !isOnline && (
           <p className="relative mt-3 text-[11px] text-fg-subtle">
-            Budget figures are saved locally. Connect to the internet to change the limit.
+            You are offline. Budget changes are saved on this device and sync later.
           </p>
         )}
       </section>
