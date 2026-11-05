@@ -62,22 +62,30 @@ export async function updateProfile(
     };
   }
 
-  // 3. Upsert to public.profiles scoped strictly to authenticated user's UUID
-  const { error: dbError } = await supabase.from("profiles").upsert(
-    {
-      id: user.id,
+  // 3. Update public.profiles scoped strictly to authenticated user's UUID
+  const { data: updatedProfile, error: dbError } = await supabase
+    .from("profiles")
+    .update({
       full_name: fullName,
       default_currency: defaultCurrency,
       updated_at: new Date().toISOString(),
-    },
-    { onConflict: "id" }
-  );
+    })
+    .eq("id", user.id)
+    .select("id")
+    .maybeSingle();
 
   if (dbError) {
     console.error("Database error updating profile:", dbError.message);
     return {
       success: false,
       error: `Failed to update profile: ${dbError.message}`,
+    };
+  }
+
+  if (!updatedProfile) {
+    return {
+      success: false,
+      error: "Profile not found.",
     };
   }
 
