@@ -1,15 +1,15 @@
 import { Metadata } from "next";
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { Clock3 } from "lucide-react";
 import { getAuthenticatedUserProfile } from "@/lib/supabase/profile";
 import { createClient } from "@/lib/supabase/server";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
 import { Card } from "@/components/ui/Card";
 import { Alert } from "@/components/ui/Alert";
-import {
-  AccountTrashList,
-  type TrashedAccountListItem,
-} from "@/components/accounts/AccountTrashList";
+import type { TrashedAccountListItem } from "@/components/accounts/AccountTrashList";
+import { OfflineAccountTrashList } from "@/components/accounts/OfflineAccountTrashList";
+import { TIME_ZONE_COOKIE, resolveTimeZone } from "@/lib/month";
 
 export const instant = false;
 
@@ -23,6 +23,8 @@ export default async function TrashPage() {
   if (!user || !profile) redirect("/login");
 
   const name = profile.full_name || user.email?.split("@")[0] || "User";
+  const cookieStore = await cookies();
+  const timeZone = resolveTimeZone(cookieStore.get(TIME_ZONE_COOKIE)?.value);
 
   const supabase = await createClient();
   const trashedAccountsResult = await supabase
@@ -90,9 +92,11 @@ export default async function TrashPage() {
               description="Soft-deleted accounts available for recovery."
               bodyClassName="pt-2"
             >
-              <AccountTrashList
-                accounts={trashedAccounts}
+              <OfflineAccountTrashList
+                ownerId={user.id}
+                serverAccounts={trashedAccounts}
                 fallbackCurrency={profile.default_currency}
+                timeZone={timeZone}
               />
             </Card>
           </>

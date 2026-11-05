@@ -1,9 +1,7 @@
 import { Suspense } from "react";
 import { Metadata } from "next";
-import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { CalendarSearch } from "lucide-react";
 import { getAuthenticatedUserProfile } from "@/lib/supabase/profile";
 import type { SupportedCurrency } from "@/lib/supabase/profile";
 import { createClient } from "@/lib/supabase/server";
@@ -11,17 +9,8 @@ import { getReportSource } from "@/lib/supabase/reports";
 import { TIME_ZONE_COOKIE, resolveTimeZone } from "@/lib/month";
 import { buildReport, getReportRange } from "@/lib/reports";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
-import { AccountReport } from "@/components/reports/AccountReport";
-import { CategoryBreakdown } from "@/components/reports/CategoryBreakdown";
-import { MonthlyComparison } from "@/components/reports/MonthlyComparison";
-import { ReportFilters } from "@/components/reports/ReportFilters";
-import { ReportOverview } from "@/components/reports/ReportOverview";
+import { OfflineReportContent } from "@/components/reports/OfflineReportContent";
 import { ReportsSkeleton } from "@/components/reports/ReportsSkeleton";
-import { Alert } from "@/components/ui/Alert";
-import { buttonBase, buttonSizes, buttonVariants } from "@/components/ui/Button";
-import { Card } from "@/components/ui/Card";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { cn } from "@/lib/cn";
 
 export const instant = false;
 
@@ -76,21 +65,7 @@ async function ReportContent({
     source = await getReportSource(supabase, userId, range);
   } catch (error) {
     console.error("Error loading reports:", error instanceof Error ? error.message : error);
-    return (
-      <Card>
-        <EmptyState
-          icon={<CalendarSearch className="h-5 w-5" />}
-          title="Couldn't load your reports"
-          description="Check your connection and try again."
-          action={
-            <Link href="/reports" className={cn(buttonBase, buttonVariants.secondary, buttonSizes.sm)}>
-              Try again
-            </Link>
-          }
-          className="py-12"
-        />
-      </Card>
-    );
+    source = { rows: [], accounts: [], categories: [], aggregatedInDatabase: false };
   }
 
   const report = buildReport(
@@ -101,76 +76,14 @@ async function ReportContent({
     first(params.currency),
     defaultCurrency
   );
-  const currency = report.currency as SupportedCurrency;
-  const sectionKey = `${range.start}|${range.end}|${currency}`;
-
   return (
-    <ReportFilters
-      preset={range.preset}
-      start={range.start}
-      end={range.end}
-      label={range.label}
-      currency={currency}
-      currencies={report.currencies}
-    >
-      <div className="space-y-4 sm:space-y-5">
-        {range.notice && <Alert variant="warning">{range.notice}</Alert>}
-
-        {report.count === 0 ? (
-          <Card>
-            <EmptyState
-              icon={<CalendarSearch className="h-5 w-5" />}
-              title="No transactions in this period"
-              description="Pick another range, or add a transaction with +."
-              className="py-12"
-            />
-          </Card>
-        ) : (
-          <>
-            <ReportOverview
-              income={report.income}
-              expense={report.expense}
-              net={report.net}
-              savingsRate={report.savingsRate}
-              count={report.count}
-              currency={currency}
-            />
-
-            <MonthlyComparison key={sectionKey} months={report.months} currency={currency} />
-
-            <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2">
-              <CategoryBreakdown
-                key={`expense-${sectionKey}`}
-                title="Expense breakdown"
-                type="expense"
-                items={report.expenseCategories}
-                total={report.expense}
-                currency={currency}
-              />
-              <CategoryBreakdown
-                key={`income-${sectionKey}`}
-                title="Income breakdown"
-                type="income"
-                items={report.incomeCategories}
-                total={report.income}
-                currency={currency}
-              />
-            </div>
-
-            <AccountReport
-              accounts={report.accounts}
-              currency={currency}
-              hiddenCurrencyCount={report.currencies.length - 1}
-            />
-          </>
-        )}
-
-        {!source.aggregatedInDatabase && (
-          <p className="text-center text-[11px] text-fg-subtle">
-            Reports are calculated without the reports migration. Apply it for faster loading.
-          </p>
-        )}
-      </div>
-    </ReportFilters>
+    <OfflineReportContent
+      ownerId={userId}
+      defaultCurrency={defaultCurrency}
+      requestedCurrency={first(params.currency)}
+      range={range}
+      serverReport={report}
+      serverAggregated={source.aggregatedInDatabase}
+    />
   );
 }

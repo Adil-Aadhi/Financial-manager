@@ -10,6 +10,7 @@ import { Alert } from "@/components/ui/Alert";
 import { UserAvatar } from "@/components/layout/UserAvatar";
 import { SupportedCurrency, Profile } from "@/lib/supabase/profile";
 import { updateProfile } from "@/app/actions/profile";
+import { useOnlineStatus } from "@/lib/offline/useOnlineStatus";
 
 interface ProfileSettingsFormProps {
   initialProfile: Profile;
@@ -24,6 +25,7 @@ const CURRENCIES: { code: SupportedCurrency; symbol: string; label: string }[] =
 
 export function ProfileSettingsForm({ initialProfile, userEmail }: ProfileSettingsFormProps) {
   const router = useRouter();
+  const isOnline = useOnlineStatus();
   const [isPending, startTransition] = useTransition();
 
   const [fullName, setFullName] = useState(initialProfile.full_name || "");
@@ -40,6 +42,11 @@ export function ProfileSettingsForm({ initialProfile, userEmail }: ProfileSettin
     setErrorMessage(null);
     setSuccessMessage(null);
     setFieldErrors({});
+
+    if (!isOnline) {
+      setErrorMessage("Connect to the internet to save profile changes.");
+      return;
+    }
 
     if (!fullName.trim()) {
       setFieldErrors({ fullName: "Name is required" });
@@ -69,6 +76,11 @@ export function ProfileSettingsForm({ initialProfile, userEmail }: ProfileSettin
           {successMessage}
         </Alert>
       )}
+      {!isOnline && (
+        <Alert variant="info">
+          Your saved profile is available offline. Profile and currency changes require an internet connection.
+        </Alert>
+      )}
 
       <div className="flex items-center gap-3">
         <UserAvatar name={fullName.trim() || userEmail} />
@@ -90,7 +102,7 @@ export function ProfileSettingsForm({ initialProfile, userEmail }: ProfileSettin
         }}
         error={fieldErrors.fullName}
         leftIcon={<User className="h-4 w-4" />}
-        disabled={isPending}
+        disabled={isPending || !isOnline}
       />
 
       <Input
@@ -116,7 +128,7 @@ export function ProfileSettingsForm({ initialProfile, userEmail }: ProfileSettin
                 type="button"
                 aria-pressed={selected}
                 onClick={() => setDefaultCurrency(c.code)}
-                disabled={isPending}
+                disabled={isPending || !isOnline}
                 title={c.label}
                 className={cn(
                   "relative flex h-16 cursor-pointer flex-col items-center justify-center gap-0.5 rounded-xl border transition-all disabled:cursor-not-allowed",
@@ -136,7 +148,13 @@ export function ProfileSettingsForm({ initialProfile, userEmail }: ProfileSettin
         </div>
       </fieldset>
 
-      <Button type="submit" size="lg" isLoading={isPending} className="w-full sm:w-auto">
+      <Button
+        type="submit"
+        size="lg"
+        isLoading={isPending}
+        disabled={!isOnline}
+        className="w-full sm:w-auto"
+      >
         {isPending ? "Saving…" : "Save changes"}
       </Button>
     </form>
