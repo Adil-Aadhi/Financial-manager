@@ -19,6 +19,7 @@ import {
   type CategoryType,
 } from "@/lib/categories";
 import { cn } from "@/lib/cn";
+import { useOnlineStatus } from "@/lib/offline/useOnlineStatus";
 
 interface CategoryFormModalProps {
   category?: CategoryRecord;
@@ -41,6 +42,7 @@ export function CategoryFormModal({
   const [error, setError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const isOnline = useOnlineStatus();
 
   const isEditing = Boolean(category);
 
@@ -58,6 +60,10 @@ export function CategoryFormModal({
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!isOnline) {
+      setError("Connect to the internet to save category changes.");
+      return;
+    }
     setError(null);
     setNameError(null);
 
@@ -111,6 +117,10 @@ export function CategoryFormModal({
           </Alert>
         )}
 
+        {!isOnline && (
+          <Alert variant="info">Category changes require an internet connection.</Alert>
+        )}
+
         <Input
           label="Category Name"
           value={name}
@@ -120,7 +130,7 @@ export function CategoryFormModal({
           }}
           error={nameError ?? undefined}
           maxLength={50}
-          disabled={isPending}
+          disabled={isPending || !isOnline}
           required
           autoFocus
         />
@@ -133,7 +143,7 @@ export function CategoryFormModal({
                 key={option}
                 type="button"
                 onClick={() => setType(option)}
-                disabled={isPending}
+                disabled={isPending || !isOnline}
                 aria-pressed={type === option}
                 className={cn(
                   "h-10 cursor-pointer rounded-lg text-xs font-semibold capitalize transition-colors disabled:cursor-not-allowed disabled:opacity-60",
@@ -158,7 +168,7 @@ export function CategoryFormModal({
                 key={option.value}
                 type="button"
                 onClick={() => setIcon(option.value)}
-                disabled={isPending}
+                disabled={isPending || !isOnline}
                 aria-label={option.label}
                 aria-pressed={icon === option.value}
                 title={option.label}
@@ -183,7 +193,7 @@ export function CategoryFormModal({
           <Button type="button" variant="ghost" onClick={closeAndReset} disabled={isPending}>
             Cancel
           </Button>
-          <Button type="submit" isLoading={isPending}>
+          <Button type="submit" isLoading={isPending} disabled={!isOnline}>
             {isPending ? "Saving…" : isEditing ? "Save Changes" : "Add Category"}
           </Button>
         </div>
@@ -203,8 +213,13 @@ export function DeleteCategoryModal({
 }) {
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const isOnline = useOnlineStatus();
 
   const handleDelete = () => {
+    if (!isOnline) {
+      setError("Connect to the internet to delete this category.");
+      return;
+    }
     setError(null);
     startTransition(async () => {
       const result = await deleteCategoryAction(category.id);
@@ -231,6 +246,10 @@ export function DeleteCategoryModal({
           </Alert>
         )}
 
+        {!isOnline && (
+          <Alert variant="info">Deleting a category requires an internet connection.</Alert>
+        )}
+
         <div className="flex items-start gap-3 rounded-2xl border border-danger/25 bg-danger/8 p-4">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-danger/12 text-danger">
             <Trash2 className="h-4 w-4" />
@@ -247,7 +266,13 @@ export function DeleteCategoryModal({
           <Button type="button" variant="ghost" onClick={onClose} disabled={isPending}>
             Cancel
           </Button>
-          <Button type="button" variant="danger" onClick={handleDelete} isLoading={isPending}>
+          <Button
+            type="button"
+            variant="danger"
+            onClick={handleDelete}
+            isLoading={isPending}
+            disabled={!isOnline}
+          >
             {isPending ? "Deleting…" : "Delete Category"}
           </Button>
         </div>

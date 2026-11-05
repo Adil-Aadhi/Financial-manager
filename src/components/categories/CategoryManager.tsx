@@ -11,7 +11,13 @@ import { Button } from "@/components/ui/Button";
 import type { CategoryRecord, CategoryType } from "@/lib/categories";
 import { cn } from "@/lib/cn";
 
-export function CategoryManager({ categories }: { categories: CategoryRecord[] }) {
+export function CategoryManager({
+  categories,
+  mutationsEnabled = true,
+}: {
+  categories: CategoryRecord[];
+  mutationsEnabled?: boolean;
+}) {
   const [activeType, setActiveType] = useState<CategoryType>("income");
   const [editingCategory, setEditingCategory] = useState<CategoryRecord | null>(null);
   const [deletingCategory, setDeletingCategory] = useState<CategoryRecord | null>(null);
@@ -89,6 +95,7 @@ export function CategoryManager({ categories }: { categories: CategoryRecord[] }
                     size="sm"
                     className="h-8 w-8 p-0"
                     onClick={() => setEditingCategory(category)}
+                    disabled={!mutationsEnabled}
                     aria-label={`Edit ${category.name}`}
                     title="Edit category"
                   >
@@ -99,6 +106,7 @@ export function CategoryManager({ categories }: { categories: CategoryRecord[] }
                     size="sm"
                     className="h-8 w-8 p-0 text-danger hover:bg-danger/10 hover:text-danger"
                     onClick={() => setDeletingCategory(category)}
+                    disabled={!mutationsEnabled}
                     aria-label={`Delete ${category.name}`}
                     title="Delete category"
                   >

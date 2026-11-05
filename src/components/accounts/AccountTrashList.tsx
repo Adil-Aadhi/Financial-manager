@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Calendar, Clock3, RotateCcw, Trash2 } from "lucide-react";
 import { restoreAccountAction } from "@/app/actions/accounts";
 import { Alert } from "@/components/ui/Alert";
@@ -9,6 +10,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { formatMoney } from "@/lib/format";
 import { cn } from "@/lib/cn";
 import type { SupportedCurrency } from "@/lib/supabase/profile";
+import { useOnlineStatus } from "@/lib/offline/useOnlineStatus";
 
 export interface TrashedAccountListItem {
   id: string;
@@ -21,10 +23,14 @@ export interface TrashedAccountListItem {
 export function AccountTrashList({
   accounts,
   fallbackCurrency,
+  timeZone,
 }: {
   accounts: TrashedAccountListItem[];
   fallbackCurrency: SupportedCurrency;
+  timeZone: string;
 }) {
+  const router = useRouter();
+  const isOnline = useOnlineStatus();
   const [error, setError] = useState<string | null>(null);
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -36,6 +42,10 @@ export function AccountTrashList({
   }, []);
 
   const restoreAccount = (accountId: string) => {
+    if (!isOnline) {
+      setError("Connect to the internet to restore this account.");
+      return;
+    }
     setError(null);
     setRestoringId(accountId);
 
@@ -49,6 +59,7 @@ export function AccountTrashList({
       }
 
       setRestoringId(null);
+      router.refresh();
     });
   };
 
@@ -71,6 +82,10 @@ export function AccountTrashList({
         </Alert>
       )}
 
+      {!isOnline && (
+        <Alert variant="info">You can review Trash offline. Restoring requires an internet connection.</Alert>
+      )}
+
       {accounts.map((account) => {
         const currency =
           (account.currency as SupportedCurrency) || fallbackCurrency;
@@ -89,14 +104,14 @@ export function AccountTrashList({
           day: "numeric",
           month: "short",
           year: "numeric",
-          timeZone: "Asia/Kolkata",
+          timeZone,
         });
 
         const formattedRestoreBy = restoreBy.toLocaleDateString("en-IN", {
           day: "numeric",
           month: "short",
           year: "numeric",
-          timeZone: "Asia/Kolkata",
+          timeZone,
         });
 
         const retentionBadgeText =
@@ -157,7 +172,7 @@ export function AccountTrashList({
               size="sm"
               leftIcon={<RotateCcw className="h-3.5 w-3.5" />}
               isLoading={isPending && restoringId === account.id}
-              disabled={isPending || now === null || isExpired}
+              disabled={!isOnline || isPending || now === null || isExpired}
               onClick={() => restoreAccount(account.id)}
               className="w-full shrink-0 sm:w-auto"
             >

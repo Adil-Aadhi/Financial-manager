@@ -8,6 +8,7 @@ import { formatPercent, getBudgetStatus, type BudgetLevel } from "@/lib/budget";
 import { formatMoney } from "@/lib/format";
 import type { SupportedCurrency } from "@/lib/supabase/profile";
 import { MonthlyBudgetModal } from "./MonthlyBudgetModal";
+import { useOnlineStatus } from "@/lib/offline/useOnlineStatus";
 
 const LEVEL_STYLES: Record<BudgetLevel, { bar: string; text: string; icon: React.ReactNode }> = {
   within: {
@@ -51,6 +52,7 @@ export function MonthlyBudgetCard({
   monthLabel,
 }: MonthlyBudgetCardProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const isOnline = useOnlineStatus();
 
   const header = (
     <div className="relative flex items-center justify-between gap-3">
@@ -68,6 +70,8 @@ export function MonthlyBudgetCard({
             size="sm"
             className="h-8 gap-1 px-2.5"
             onClick={() => setIsModalOpen(true)}
+            disabled={!isOnline}
+            title={isOnline ? undefined : "Connect to the internet to edit the budget"}
             aria-label="Edit budget"
           >
             <Pencil className="h-3.5 w-3.5" />
@@ -92,7 +96,7 @@ export function MonthlyBudgetCard({
             Budgets need a database update. Run the monthly-budget migration to turn them on.
           </p>
         ) : limit === null ? (
-          <EmptyBudget onSet={() => setIsModalOpen(true)} />
+          <EmptyBudget onSet={() => setIsModalOpen(true)} enabled={isOnline} />
         ) : (
           <BudgetDetails
             limit={limit}
@@ -100,6 +104,11 @@ export function MonthlyBudgetCard({
             currency={currency}
             otherCurrencyCount={otherCurrencyCount}
           />
+        )}
+        {available && !isOnline && (
+          <p className="relative mt-3 text-[11px] text-fg-subtle">
+            Budget figures are saved locally. Connect to the internet to change the limit.
+          </p>
         )}
       </section>
 
@@ -115,7 +124,7 @@ export function MonthlyBudgetCard({
   );
 }
 
-function EmptyBudget({ onSet }: { onSet: () => void }) {
+function EmptyBudget({ onSet, enabled }: { onSet: () => void; enabled: boolean }) {
   return (
     <div className="relative mt-4 flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-start gap-3">
@@ -130,7 +139,13 @@ function EmptyBudget({ onSet }: { onSet: () => void }) {
           </p>
         </div>
       </div>
-      <Button onClick={onSet} className="w-full shrink-0 sm:w-auto" leftIcon={<Target className="h-4 w-4" />}>
+      <Button
+        onClick={onSet}
+        disabled={!enabled}
+        title={enabled ? undefined : "Connect to the internet to set a budget"}
+        className="w-full shrink-0 sm:w-auto"
+        leftIcon={<Target className="h-4 w-4" />}
+      >
         Set Budget
       </Button>
     </div>

@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { getAuthenticatedUserProfile } from "@/lib/supabase/profile";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
 import { Card } from "@/components/ui/Card";
-import { ProfileSettingsForm } from "@/components/profile/ProfileSettingsForm";
+import { OfflineProfileSettingsForm } from "@/components/profile/OfflineProfileSettingsForm";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { AccentPicker } from "@/components/theme/AccentPicker";
 import { SignOutButton } from "@/components/auth/SignOutButton";
@@ -27,7 +27,11 @@ export default async function SettingsPage() {
 
       <div className="max-w-2xl space-y-5">
         <Card title="Profile">
-          <ProfileSettingsForm initialProfile={profile} userEmail={user.email || ""} />
+          <OfflineProfileSettingsForm
+            ownerId={user.id}
+            serverProfile={profile}
+            userEmail={user.email || ""}
+          />
         </Card>
 
         <Card title="Appearance">

@@ -1,29 +1,16 @@
-import { Metadata } from "next";
-import Link from "next/link";
+import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import {
-  ArrowDownLeft,
-  ArrowUpRight,
-  BarChart3,
-  Landmark,
-  PieChart,
-  PiggyBank,
-  ReceiptText,
-  Wallet,
-} from "lucide-react";
+  OfflineHomeDashboard,
+  type HomeAccount,
+  type HomeTransaction,
+} from "@/components/home/OfflineHomeDashboard";
+import { AppShell, PageHeader } from "@/components/layout/AppShell";
+import { TIME_ZONE_COOKIE, getMonthRange, resolveTimeZone } from "@/lib/month";
+import { getMonthlyBudgetOverview } from "@/lib/supabase/budget";
 import { getAuthenticatedUserProfile } from "@/lib/supabase/profile";
 import { createClient } from "@/lib/supabase/server";
-import { formatMoney } from "@/lib/format";
-import type { SupportedCurrency } from "@/lib/supabase/profile";
-import { cn } from "@/lib/cn";
-import { AppShell, PageHeader } from "@/components/layout/AppShell";
-import { CategoryTile, categoryStyle } from "@/components/categories/CategoryIcon";
-import { Card, CardLink } from "@/components/ui/Card";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { MonthlyBudgetCard } from "@/components/budget/MonthlyBudgetCard";
-import { getMonthlyBudgetOverview } from "@/lib/supabase/budget";
-import { TIME_ZONE_COOKIE, getMonthRange, resolveTimeZone } from "@/lib/month";
 
 export const instant = false;
 
@@ -37,364 +24,80 @@ export default async function HomePage() {
   if (!user || !profile) redirect("/login");
 
   const name = profile.full_name || user.email?.split("@")[0] || "there";
-  const firstName = name.split(" ")[0];
-  const currency = profile.default_currency;
-  const supabase = await createClient();
-  // The user's local calendar month (time zone reported by the browser).
   const cookieStore = await cookies();
   const month = getMonthRange(resolveTimeZone(cookieStore.get(TIME_ZONE_COOKIE)?.value));
+  const supabase = await createClient();
 
-  const [accountsResult, budget] = await Promise.all([
+  const [accountsResult, transactionsResult, budget] = await Promise.all([
     supabase
       .from("accounts")
-      .select("id, name, opening_balance, currency")
+      .select("id, name, opening_balance, currency, deleted_at, created_at")
       .eq("user_id", user.id)
-      .is("deleted_at", null)
       .order("created_at", { ascending: false }),
-    // Includes expenses from every account, including ones in Trash.
-    getMonthlyBudgetOverview(supabase, user.id, currency, month),
+    supabase
+      .from("transactions")
+      .select("id, account_id, category_id, type, amount, description, transaction_date, created_at, categories(name, icon)")
+      .eq("user_id", user.id)
+      .order("transaction_date", { ascending: false })
+      .order("created_at", { ascending: false }),
+    getMonthlyBudgetOverview(supabase, user.id, profile.default_currency, month),
   ]);
 
-  let accounts = accountsResult.data;
-
+  let accounts: HomeAccount[] = (accountsResult.data ?? []).map((account) => ({
+    id: account.id,
+    name: account.name,
+    opening_balance: account.opening_balance,
+    currency: account.currency,
+    deleted_at: account.deleted_at ?? null,
+    created_at: account.created_at,
+  }));
   if (accountsResult.error?.code === "42703") {
-    const legacyAccountsResult = await supabase
+    const legacy = await supabase
       .from("accounts")
-      .select("id, name, opening_balance, currency")
+      .select("id, name, opening_balance, currency, created_at")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
-
-    accounts = legacyAccountsResult.data;
+    accounts = (legacy.data ?? []).map((account) => ({
+      id: account.id,
+      name: account.name,
+      opening_balance: account.opening_balance,
+      currency: account.currency,
+      deleted_at: null,
+      created_at: account.created_at,
+    }));
+    if (legacy.error) console.error("Error fetching dashboard accounts:", legacy.error.message);
+  } else if (accountsResult.error) {
+    console.error("Error fetching dashboard accounts:", accountsResult.error.message);
   }
-
-  const totalAccountCount = accounts?.length ?? 0;
-  const totalOpeningBalance =
-    accounts?.reduce(
-      (sum, acc) => sum + (Number(acc.opening_balance) || 0),
-      0
-    ) ?? 0;
-  const accountIds = (accounts ?? []).map((account) => account.id);
-  const transactionsResult = accountIds.length
-    ? await supabase
-        .from("transactions")
-        .select("id, account_id, type, amount, description, transaction_date, created_at, categories(name, icon)")
-        .eq("user_id", user.id)
-        .in("account_id", accountIds)
-        .order("transaction_date", { ascending: false })
-        .order("created_at", { ascending: false })
-    : { data: [], error: null };
-
   if (transactionsResult.error) {
     console.error("Error fetching dashboard transactions:", transactionsResult.error.message);
   }
 
-  const transactions = transactionsResult.data ?? [];
-  const currentMonthPrefix = month.prefix;
-  let totalIncome = 0;
-  let totalExpenses = 0;
-  let monthIncome = 0;
-  let monthExpenses = 0;
-  const totalsByAccount = new Map<string, { income: number; expense: number }>();
-  const monthSpendByCategory = new Map<string, { name: string; icon: string; total: number }>();
-
-  for (const transaction of transactions) {
-    const amount = Number(transaction.amount) || 0;
-    const accountTotals = totalsByAccount.get(transaction.account_id) ?? { income: 0, expense: 0 };
-    if (transaction.type === "income") {
-      totalIncome += amount;
-      accountTotals.income += amount;
-      if (transaction.transaction_date.startsWith(currentMonthPrefix)) monthIncome += amount;
-    } else if (transaction.type === "expense") {
-      totalExpenses += amount;
-      accountTotals.expense += amount;
-      if (transaction.transaction_date.startsWith(currentMonthPrefix)) {
-        monthExpenses += amount;
-        const categoryValue = transaction.categories;
-        const category = Array.isArray(categoryValue) ? categoryValue[0] : categoryValue;
-        const key = category?.name ?? "Other";
-        const entry = monthSpendByCategory.get(key) ?? {
-          name: key,
-          icon: category?.icon ?? "circle-ellipsis",
-          total: 0,
-        };
-        entry.total += amount;
-        monthSpendByCategory.set(key, entry);
-      }
-    }
-    totalsByAccount.set(transaction.account_id, accountTotals);
-  }
-
-  const calculatedTotalBalance = totalOpeningBalance + totalIncome - totalExpenses;
-  const saved = monthIncome - monthExpenses;
-  const topSpending = [...monthSpendByCategory.values()].sort((a, b) => b.total - a.total);
+  const transactions: HomeTransaction[] = (transactionsResult.data ?? []).map((transaction) => {
+    const value = transaction.categories;
+    const category = Array.isArray(value) ? value[0] : value;
+    return {
+      id: transaction.id,
+      account_id: transaction.account_id,
+      category_id: transaction.category_id,
+      type: transaction.type,
+      amount: transaction.amount,
+      description: transaction.description,
+      transaction_date: transaction.transaction_date,
+      created_at: transaction.created_at,
+      category: category ? { name: category.name, icon: category.icon } : null,
+    };
+  });
 
   return (
-    <AppShell userName={name} userEmail={user.email} currency={currency}>
-      <PageHeader eyebrow="Overview" title={`Hi, ${firstName}`} />
-
-      <div className="space-y-4 sm:space-y-5">
-        {/* Balance hero */}
-        <section className="glass-strong glass-edge animate-rise overflow-hidden rounded-3xl p-4 sm:p-7">
-          <div className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full bg-[radial-gradient(circle,var(--aurora-1),transparent_70%)]" />
-
-          <div className="relative flex items-center justify-between">
-            <span className="flex items-center gap-2 text-xs font-medium text-fg-muted">
-              <Wallet className="h-4 w-4 text-accent" />
-              Total balance
-            </span>
-            <span className="rounded-full border border-line bg-glass-hover px-2.5 py-0.5 font-mono text-[11px] font-semibold text-fg-muted">
-              {currency}
-            </span>
-          </div>
-
-          <p className="relative mt-3 font-money text-[30px] font-bold leading-none tracking-tight text-fg sm:text-5xl">
-            {formatMoney(calculatedTotalBalance, currency)}
-          </p>
-          <p className="relative mt-2 text-xs text-fg-subtle">
-            {totalAccountCount === 0
-              ? "No accounts yet"
-              : `Across ${totalAccountCount} account${totalAccountCount === 1 ? "" : "s"}`}
-          </p>
-
-          <div className="relative mt-5 grid grid-cols-3 gap-2 sm:mt-6 sm:gap-3">
-            <MonthStat
-              label="Income"
-              value={formatMoney(monthIncome, currency, { compact: true })}
-              icon={<ArrowDownLeft className="h-3.5 w-3.5" />}
-              tone="positive"
-            />
-            <MonthStat
-              label="Expenses"
-              value={formatMoney(monthExpenses, currency, { compact: true })}
-              icon={<ArrowUpRight className="h-3.5 w-3.5" />}
-              tone="negative"
-            />
-            <MonthStat
-              label="Saved"
-              value={formatMoney(saved, currency, { compact: true })}
-              icon={<PiggyBank className="h-3.5 w-3.5" />}
-              tone={saved < 0 ? "negative" : "neutral"}
-            />
-          </div>
-          <p className="relative mt-3 text-[11px] text-fg-subtle">This month</p>
-        </section>
-
-        <MonthlyBudgetCard
-          available={budget.available}
-          limit={budget.limit}
-          spent={budget.spent}
-          otherCurrencyCount={budget.otherCurrencyCount}
-          currency={currency}
-          monthLabel={month.label}
-        />
-
-        <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-3">
-          <div className="space-y-4 sm:space-y-5 lg:col-span-2">
-            <Card
-              title="Recent transactions"
-              action={<CardLink href="/transactions">View all</CardLink>}
-              bodyClassName="pt-2"
-            >
-              {transactions.length > 0 ? (
-                <div className="divide-y divide-line">
-                  {transactions.slice(0, 5).map((transaction) => {
-                    const categoryValue = transaction.categories;
-                    const category = Array.isArray(categoryValue) ? categoryValue[0] : categoryValue;
-                    const income = transaction.type === "income";
-                    return (
-                      <Link
-                        key={transaction.id}
-                        href={`/accounts/${transaction.account_id}`}
-                        className="flex items-center gap-3 px-1 py-2.5 transition-colors first:pt-1 last:pb-1 hover:opacity-80"
-                      >
-                        <CategoryTile icon={category?.icon} size="md" />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-semibold text-fg">
-                            {transaction.description || category?.name || (income ? "Income" : "Expense")}
-                          </p>
-                          <p className="mt-0.5 truncate text-[11px] text-fg-subtle">
-                            {[transaction.description ? category?.name : null, formatShortDate(transaction.transaction_date)].filter(Boolean).join(" · ")}
-                          </p>
-                        </div>
-                        <p className={cn(
-                          "shrink-0 font-money text-[13px] font-semibold sm:text-sm",
-                          income ? "text-positive" : "text-danger"
-                        )}>
-                          {income ? "+" : "−"}{formatMoney(Number(transaction.amount) || 0, currency)}
-                        </p>
-                      </Link>
-                    );
-                  })}
-                </div>
-              ) : (
-                <EmptyState
-                  icon={<ReceiptText className="h-5 w-5" />}
-                  title="No transactions yet"
-                  description="Tap + to record your first income or expense."
-                />
-              )}
-            </Card>
-
-            <Card title="Cash flow" description="Income vs expenses · last 6 months">
-              <EmptyChart />
-            </Card>
-          </div>
-
-          <div className="space-y-4 sm:space-y-5">
-            <Card title="Accounts" bodyClassName="pt-2">
-              {accounts && accounts.length > 0 ? (
-                <div className="space-y-2 p-1">
-                  {accounts.map((acc) => (
-                    <Link
-                      key={acc.id}
-                      href={`/accounts/${acc.id}`}
-                      className="flex items-center justify-between rounded-xl border border-line bg-glass-hover p-3 transition-colors hover:border-accent/40"
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-soft text-accent">
-                          <Landmark className="h-4 w-4" />
-                        </span>
-                        <div>
-                          <p className="text-xs font-semibold text-fg">{acc.name}</p>
-                          <p className="font-money text-[11px] text-fg-subtle">
-                            {formatMoney(
-                              (Number(acc.opening_balance) || 0) +
-                                (totalsByAccount.get(acc.id)?.income ?? 0) -
-                                (totalsByAccount.get(acc.id)?.expense ?? 0),
-                              acc.currency || currency
-                            )}
-                          </p>
-                        </div>
-                      </div>
-                      <ArrowUpRight className="h-4 w-4 text-fg-subtle" />
-                    </Link>
-                  ))}
-                </div>
-              ) : (
-                <EmptyState
-                  icon={<Landmark className="h-5 w-5" />}
-                  title="No accounts yet"
-                  description="Bank, cash, UPI and cards will show here."
-                />
-              )}
-            </Card>
-
-            <Card title="Top spending" description="This month" bodyClassName="pt-3">
-              {topSpending.length > 0 ? (
-                <TopSpending items={topSpending} total={monthExpenses} currency={currency} />
-              ) : (
-                <EmptyState icon={<PieChart className="h-5 w-5" />} title="Nothing spent yet" />
-              )}
-            </Card>
-          </div>
-        </div>
-      </div>
+    <AppShell userName={name} userEmail={user.email} currency={profile.default_currency}>
+      <PageHeader eyebrow="Overview" title={`Hi, ${name.split(" ")[0]}`} />
+      <OfflineHomeDashboard
+        ownerId={user.id}
+        currency={profile.default_currency}
+        month={month}
+        serverSnapshot={{ accounts, transactions, budget }}
+      />
     </AppShell>
-  );
-}
-
-function formatShortDate(value: string) {
-  const [year, month, day] = value.slice(0, 10).split("-").map(Number);
-  const date = new Date(Date.UTC(year, month - 1, day));
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", timeZone: "UTC" }).format(date);
-}
-
-function TopSpending({
-  items,
-  total,
-  currency,
-}: {
-  items: { name: string; icon: string; total: number }[];
-  total: number;
-  currency: SupportedCurrency;
-}) {
-  const top = items.slice(0, 5);
-  return (
-    <div className="space-y-4">
-      <div className="flex h-2.5 gap-0.5 overflow-hidden rounded-full" aria-hidden="true">
-        {top.map((item) => (
-          <span
-            key={item.name}
-            style={{ ...categoryStyle(item.icon), flexGrow: item.total }}
-            className="cat-fill min-w-1 rounded-full"
-          />
-        ))}
-      </div>
-      <ul className="space-y-2.5">
-        {top.map((item) => (
-          <li key={item.name} className="flex items-center gap-3">
-            <CategoryTile icon={item.icon} size="sm" />
-            <span className="min-w-0 flex-1 truncate text-sm font-medium text-fg">{item.name}</span>
-            <span className="text-[11px] text-fg-subtle">
-              {total > 0 ? Math.round((item.total / total) * 100) : 0}%
-            </span>
-            <span className="w-20 shrink-0 text-right font-money text-[13px] font-semibold text-fg">
-              {formatMoney(item.total, currency, { compact: true })}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function MonthStat({
-  label,
-  value,
-  icon,
-  tone,
-}: {
-  label: string;
-  value: string;
-  icon: React.ReactNode;
-  tone: "positive" | "negative" | "neutral";
-}) {
-  return (
-    <div className="min-w-0 rounded-2xl border border-line bg-glass-hover p-2.5 sm:p-4">
-      <span
-        className={cn(
-          "flex h-6 w-6 items-center justify-center rounded-lg",
-          tone === "positive" && "bg-positive/12 text-positive",
-          tone === "negative" && "bg-danger/12 text-danger",
-          tone === "neutral" && "bg-accent-3/12 text-accent-3"
-        )}
-      >
-        {icon}
-      </span>
-      <p className="mt-2 text-[11px] font-medium text-fg-subtle">{label}</p>
-      <p
-        className={cn(
-          "mt-0.5 truncate font-money text-sm font-semibold sm:text-base",
-          tone === "positive" && "text-positive",
-          tone === "negative" && "text-danger",
-          tone === "neutral" && "text-fg"
-        )}
-      >
-        {value}
-      </p>
-    </div>
-  );
-}
-
-function EmptyChart() {
-  const bars = [38, 55, 30, 62, 45, 70];
-  return (
-    <div className="relative">
-      <div className="flex h-40 items-end justify-between gap-3 px-1" aria-hidden="true">
-        {bars.map((h, i) => (
-          <div key={i} className="flex flex-1 items-end justify-center gap-1">
-            <span className="w-full max-w-4 rounded-t-md bg-line-strong" style={{ height: `${h}%` }} />
-            <span className="w-full max-w-4 rounded-t-md bg-line" style={{ height: `${h * 0.7}%` }} />
-          </div>
-        ))}
-      </div>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="glass flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium text-fg-muted">
-          <BarChart3 className="h-3.5 w-3.5 text-accent" />
-          Your trend appears after a few transactions
-        </span>
-      </div>
-    </div>
   );
 }

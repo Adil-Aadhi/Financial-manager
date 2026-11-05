@@ -10,6 +10,7 @@ import { Modal } from "@/components/ui/Modal";
 import { validateBudgetAmount } from "@/lib/budget";
 import { formatMoney } from "@/lib/format";
 import type { SupportedCurrency } from "@/lib/supabase/profile";
+import { useOnlineStatus } from "@/lib/offline/useOnlineStatus";
 
 function currencySymbol(code: string) {
   try {
@@ -44,6 +45,7 @@ export function MonthlyBudgetModal({
   currentAmount: number | null;
 }) {
   const router = useRouter();
+  const isOnline = useOnlineStatus();
   const isEditing = currentAmount !== null;
   const [amount, setAmount] = useState(isEditing ? String(currentAmount) : "");
   const [fieldError, setFieldError] = useState<string | null>(null);
@@ -55,6 +57,10 @@ export function MonthlyBudgetModal({
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (isPending) return;
+    if (!isOnline) {
+      setError("Connect to the internet to save your budget.");
+      return;
+    }
     setError(null);
 
     if (!amount.trim()) {
@@ -81,6 +87,10 @@ export function MonthlyBudgetModal({
 
   const handleRemove = () => {
     if (isPending) return;
+    if (!isOnline) {
+      setError("Connect to the internet to remove your budget.");
+      return;
+    }
     setError(null);
     startTransition(async () => {
       const result = await deleteMonthlyBudgetAction();
@@ -104,6 +114,7 @@ export function MonthlyBudgetModal({
         size="sm"
       >
         <div className="space-y-4">
+          {!isOnline && <Alert variant="info">Removing a budget requires an internet connection.</Alert>}
           <div className="flex items-center justify-between gap-3 rounded-2xl border border-danger/25 bg-danger/8 p-3.5">
             <span className="text-sm font-medium text-fg-muted">Current limit</span>
             <span className="font-money text-base font-bold text-fg">
@@ -119,7 +130,13 @@ export function MonthlyBudgetModal({
             >
               Cancel
             </Button>
-            <Button variant="danger" size="lg" onClick={handleRemove} isLoading={isPending}>
+            <Button
+              variant="danger"
+              size="lg"
+              onClick={handleRemove}
+              isLoading={isPending}
+              disabled={!isOnline}
+            >
               {isPending ? "Removing…" : "Remove"}
             </Button>
           </div>
@@ -142,6 +159,7 @@ export function MonthlyBudgetModal({
             {error}
           </Alert>
         )}
+        {!isOnline && <Alert variant="info">Budget changes require an internet connection.</Alert>}
 
         <div className="rounded-2xl border border-line bg-glass-hover px-4 pb-4 pt-3 text-center">
           <div className="flex items-center justify-between">
@@ -165,7 +183,7 @@ export function MonthlyBudgetModal({
                 setAmount(sanitizeAmount(event.target.value));
                 setFieldError(null);
               }}
-              disabled={isPending}
+              disabled={isPending || !isOnline}
               autoFocus
               aria-invalid={Boolean(fieldError)}
               aria-describedby={fieldError ? "budget-amount-error" : undefined}
@@ -184,7 +202,13 @@ export function MonthlyBudgetModal({
           )}
         </div>
 
-        <Button type="submit" size="lg" className="w-full" isLoading={isPending}>
+        <Button
+          type="submit"
+          size="lg"
+          className="w-full"
+          isLoading={isPending}
+          disabled={!isOnline}
+        >
           {isPending ? "Saving…" : isEditing ? "Save changes" : "Set budget"}
         </Button>
 
@@ -195,7 +219,7 @@ export function MonthlyBudgetModal({
               setError(null);
               setIsConfirmingRemove(true);
             }}
-            disabled={isPending}
+            disabled={isPending || !isOnline}
             className="mx-auto flex cursor-pointer items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-danger transition-colors hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Trash2 className="h-3.5 w-3.5" />

@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { Alert } from "@/components/ui/Alert";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
 import { AddCategoryButton } from "@/components/categories/AddCategoryButton";
-import { CategoryManager } from "@/components/categories/CategoryManager";
+import { OfflineCategoryManager } from "@/components/categories/OfflineCategoryManager";
 import type { CategoryRecord, CategoryType } from "@/lib/categories";
 import { getAuthenticatedUserProfile } from "@/lib/supabase/profile";
 import { createClient } from "@/lib/supabase/server";
@@ -61,13 +61,19 @@ export default async function CategoriesPage() {
       />
 
       <div className="space-y-5">
-        {(categoriesResult.error || !defaultsReady) && (
+        {categoriesResult.error && (
+          <Alert variant="warning" title="Using saved categories">
+            The server copy could not be refreshed. Your last complete local snapshot is shown when available.
+          </Alert>
+        )}
+
+        {!categoriesResult.error && !defaultsReady && (
           <Alert variant="warning" title="Database update required">
             Run the categories migration in Supabase to enable the protected default categories.
           </Alert>
         )}
 
-        {!categoriesResult.error && <CategoryManager categories={categories} />}
+        <OfflineCategoryManager ownerId={user.id} serverCategories={categories} />
       </div>
     </AppShell>
   );
