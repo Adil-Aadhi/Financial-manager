@@ -1,14 +1,15 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { ArrowDownLeft, ArrowUpRight, Landmark } from "lucide-react";
 import { TransactionHistory } from "@/components/transactions/TransactionHistory";
 import { Card } from "@/components/ui/Card";
 import { cn } from "@/lib/cn";
 import { formatMoney } from "@/lib/format";
-import { ensureOfflineBootstrap } from "@/lib/offline/bootstrap";
 import { offlineDb } from "@/lib/offline/db";
+import { useOfflineRefresh } from "@/lib/offline/useOfflineRefresh";
+import { useLocalContentMark } from "@/lib/perf";
 import type { SupportedCurrency } from "@/lib/supabase/profile";
 import {
   normalizeTransactionDate,
@@ -52,16 +53,7 @@ export function OfflineAccountDetails({
     ),
   ].join("|");
 
-  useEffect(() => {
-    void ensureOfflineBootstrap(ownerId, true).catch((error: unknown) => {
-      if (navigator.onLine) {
-        console.warn(
-          "Unable to refresh the offline account details:",
-          error instanceof Error ? error.message : error
-        );
-      }
-    });
-  }, [ownerId, serverVersion]);
+  useOfflineRefresh(ownerId, serverVersion, "the offline account details");
 
   const localSnapshot = useLiveQuery(async () => {
     const meta = await offlineDb.syncMeta.get(ownerId);
@@ -126,6 +118,7 @@ export function OfflineAccountDetails({
       categories,
     };
   }, [ownerId, serverAccount.id]);
+  useLocalContentMark(localSnapshot != null); // TEMPORARY perf (Step 3 Phase 0)
 
   const account = localSnapshot?.account ?? serverAccount;
   const transactions = localSnapshot?.transactions ?? serverTransactions;

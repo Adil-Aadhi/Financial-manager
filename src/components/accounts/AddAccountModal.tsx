@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
 import { createAccountAction } from "@/app/actions/accounts";
+import { markOfflineDataStale } from "@/lib/offline/bootstrap";
 
 export interface AddAccountModalProps {
   isOpen: boolean;
@@ -61,6 +62,7 @@ export function AddAccountModal({
       if (!res.success) {
         setError(res.error || "Failed to create account. Please try again.");
       } else {
+        markOfflineDataStale();
         setSuccessMessage(`Account "${trimmed}" created successfully.`);
         if (onSuccess && res.account) {
           onSuccess(res.account);

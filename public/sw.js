@@ -1,4 +1,7 @@
-const CACHE_VERSION = "finance-tracker-shell-v2";
+// v3: network responses stream straight to the page; caching happens in the background.
+// The private cache keeps its name on purpose: its contents are unchanged, and renaming it
+// would make activate() delete every route saved for offline use.
+const CACHE_VERSION = "finance-tracker-shell-v3";
 const PRIVATE_CACHE_VERSION = "finance-tracker-private-v2";
 const OFFLINE_URL = "/offline";
 const PRECACHE_URLS = [
@@ -42,19 +45,33 @@ self.addEventListener("message", (event) => {
   }
 });
 
-async function networkFirst(request, fallbackToOffline = true, cacheName = CACHE_VERSION) {
-  const cache = await caches.open(cacheName);
+async function networkFirst(event, request, fallbackToOffline = true, cacheName = CACHE_VERSION) {
   try {
-    const response = await fetch(request);
+    // Next.js cancels some RSC/prefetch streams once it has what it needs. Now that the page
+    // reads the stream directly, that cancel would also abort this fetch and the background
+    // cache write, so offline navigation would lose those payloads. Fetch with a signal of the
+    // worker's own so the body is still downloaded and cached, as it was before v3.
+    // Navigation requests keep the original request: their mode can't be copied.
+    const networkRequest =
+      request.mode === "navigate" ? request : new Request(request, { signal: new AbortController().signal });
+    const response = await fetch(networkRequest);
     if (response.ok) {
-      try {
-        await cache.put(request, response.clone());
-      } catch {
-        // Some build-specific responses cannot be stored. The network response is still valid.
-      }
+      // Return the response as soon as its headers arrive so streamed HTML/RSC reaches the
+      // page chunk by chunk. cache.put() only settles after the whole body has been read, so
+      // it runs in the background; waitUntil keeps the worker alive until it finishes.
+      const copy = response.clone();
+      event.waitUntil(
+        caches
+          .open(cacheName)
+          .then((cache) => cache.put(request, copy))
+          .catch(() => {
+            // Some build-specific responses cannot be stored. The network response is still valid.
+          })
+      );
     }
     return response;
   } catch {
+    const cache = await caches.open(cacheName);
     const cached =
       (await cache.match(request)) ||
       (request.mode === "navigate" ? await cache.match(request, { ignoreSearch: true }) : null);
@@ -127,12 +144,12 @@ self.addEventListener("fetch", (event) => {
   // Cache Next.js route payloads separately from documents (the response Vary header
   // distinguishes them). This keeps previously prefetched client navigations available offline.
   if (request.headers.get("RSC") === "1") {
-    event.respondWith(networkFirst(request, false, PRIVATE_CACHE_VERSION));
+    event.respondWith(networkFirst(event, request, false, PRIVATE_CACHE_VERSION));
     return;
   }
 
   if (request.mode === "navigate") {
-    event.respondWith(networkFirst(request, true, PRIVATE_CACHE_VERSION));
+    event.respondWith(networkFirst(event, request, true, PRIVATE_CACHE_VERSION));
     return;
   }
 

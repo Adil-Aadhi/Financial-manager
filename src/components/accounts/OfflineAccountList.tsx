@@ -1,12 +1,13 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Landmark } from "lucide-react";
 import { AccountList, type AccountListItem } from "@/components/accounts/AccountList";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { ensureOfflineBootstrap } from "@/lib/offline/bootstrap";
 import { offlineDb } from "@/lib/offline/db";
+import { useOfflineRefresh } from "@/lib/offline/useOfflineRefresh";
+import { useLocalContentMark } from "@/lib/perf";
 import type { SupportedCurrency } from "@/lib/supabase/profile";
 
 export function OfflineAccountList({
@@ -27,16 +28,7 @@ export function OfflineAccountList({
     )
     .join("|");
 
-  useEffect(() => {
-    void ensureOfflineBootstrap(ownerId, true).catch((error: unknown) => {
-      if (navigator.onLine) {
-        console.warn(
-          "Unable to refresh the offline account list:",
-          error instanceof Error ? error.message : error
-        );
-      }
-    });
-  }, [ownerId, serverVersion]);
+  useOfflineRefresh(ownerId, serverVersion, "the offline account list");
 
   const localAccounts = useLiveQuery(async () => {
     const meta = await offlineDb.syncMeta.get(ownerId);
@@ -67,6 +59,7 @@ export function OfflineAccountList({
         total_expense: totalsByAccount.get(account.id)?.expense ?? 0,
       }));
   }, [ownerId]);
+  useLocalContentMark(localAccounts != null); // TEMPORARY perf (Step 3 Phase 0)
 
   const accounts = localAccounts ?? serverAccounts;
   if (accounts.length === 0) {

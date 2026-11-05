@@ -4,6 +4,7 @@ import React, { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { AlertCircle, Trash2 } from "lucide-react";
 import { deleteMonthlyBudgetAction, saveMonthlyBudgetAction } from "@/app/actions/budget";
+import { markOfflineDataStale } from "@/lib/offline/bootstrap";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
@@ -80,6 +81,7 @@ export function MonthlyBudgetModal({
         setError(result.error ?? "Unable to save your budget.");
         return;
       }
+      markOfflineDataStale();
       onClose();
       router.refresh();
     });
@@ -99,6 +101,7 @@ export function MonthlyBudgetModal({
         setIsConfirmingRemove(false);
         return;
       }
+      markOfflineDataStale();
       onClose();
       router.refresh();
     });

@@ -18,6 +18,7 @@ import {
   updateTransactionAction,
 } from "@/app/actions/transactions";
 import { CategoryTile } from "@/components/categories/CategoryIcon";
+import { markOfflineDataStale } from "@/lib/offline/bootstrap";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
@@ -229,6 +230,7 @@ export function QuickTransactionModal({
         return;
       }
 
+      markOfflineDataStale();
       onSaved?.(isEditing ? "Transaction updated." : "Transaction added.");
       onClose();
       router.refresh();

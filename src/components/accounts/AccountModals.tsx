@@ -7,6 +7,7 @@ import {
   updateAccountAction,
 } from "@/app/actions/accounts";
 import type { AccountListItem } from "@/components/accounts/AccountList";
+import { markOfflineDataStale } from "@/lib/offline/bootstrap";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -58,6 +59,7 @@ export function EditAccountModal({
         return;
       }
 
+      markOfflineDataStale();
       onClose();
     });
   };
@@ -152,6 +154,7 @@ export function DeleteAccountModal({
         return;
       }
 
+      markOfflineDataStale();
       onClose();
     });
   };

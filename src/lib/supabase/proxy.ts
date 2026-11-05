@@ -77,10 +77,15 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
-  // IMPORTANT: Do NOT use getSession(). getUser() validates the token with Supabase Auth server.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // IMPORTANT: Do NOT use getSession() on its own: it trusts the cookie without verifying it.
+  // getClaims() loads the session (refreshing an expired access token and writing the new
+  // cookies through setAll above), rejects expired tokens, and verifies the JWT signature.
+  // With this project's asymmetric (ES256) signing keys that check runs locally against the
+  // cached JWKS, so navigations no longer wait on a Supabase Auth round trip. With a symmetric
+  // key it falls back to getUser() automatically. Server Actions still call getUser() before
+  // writing, and RLS verifies the JWT on every database query.
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const user = claimsData?.claims.sub ? claimsData.claims : null;
 
   // Rule 1: Invalid/expired session on protected routes -> redirect to /login
   if (!user && isProtectedRoute) {

@@ -7,7 +7,22 @@ import { createClient } from "@/lib/supabase/client";
 const PAGE_SIZE = 500;
 const BOOTSTRAP_FRESH_MS = 60_000;
 const MISSING_OBJECT_CODES = new Set(["42P01", "PGRST205"]);
-const inFlight = new Map<string, Promise<LocalSyncMeta>>();
+
+/** Dispatched on window after a successful server mutation; mounted pages refresh on it. */
+export const OFFLINE_DATA_STALE_EVENT = "finance-tracker:offline-data-stale";
+
+/**
+ * Bumped by markOfflineDataStale() after every successful server mutation. A refresh records
+ * the value it started with, so one that began before a write can never count as fresh.
+ */
+let mutationGeneration = 0;
+/** Per owner: the mutationGeneration at which the last successful refresh started. */
+const syncedGeneration = new Map<string, number>();
+interface InFlightRefresh {
+  promise: Promise<LocalSyncMeta>;
+  generation: number;
+}
+const inFlight = new Map<string, InFlightRefresh>();
 
 interface QueryError {
   code?: string;
@@ -275,17 +290,58 @@ async function runBootstrap(expectedUserId: string) {
   return commitSnapshot(data.user, snapshot);
 }
 
-export async function ensureOfflineBootstrap(expectedUserId: string, force = false) {
-  const current = inFlight.get(expectedUserId);
-  if (current) return current;
+/**
+ * Call after a server mutation succeeds. The next refresh for any owner downloads a new
+ * snapshot instead of trusting the freshness window, and mounted pages start one right away.
+ */
+export function markOfflineDataStale() {
+  mutationGeneration += 1;
+  window.dispatchEvent(new Event(OFFLINE_DATA_STALE_EVENT));
+}
 
-  if (!force) {
-    const meta = await offlineDb.syncMeta.get(expectedUserId);
-    if (meta && Date.now() - Date.parse(meta.completedAt) < BOOTSTRAP_FRESH_MS) return meta;
+/**
+ * Refreshes this owner's IndexedDB snapshot from Supabase when it is needed:
+ * - `force`, or a server mutation since the last successful refresh: always.
+ * - otherwise: only when the last complete snapshot is older than BOOTSTRAP_FRESH_MS.
+ * Concurrent callers share one download.
+ */
+export async function ensureOfflineBootstrap(
+  expectedUserId: string,
+  force = false
+): Promise<LocalSyncMeta> {
+  const generation = mutationGeneration;
+  const current = inFlight.get(expectedUserId);
+  if (current) {
+    if (current.generation === generation) return current.promise;
+    // That download started before the latest mutation and may hold pre-mutation rows.
+    return current.promise
+      .catch(() => undefined)
+      .then(() => ensureOfflineBootstrap(expectedUserId, true));
   }
 
-  const promise = runBootstrap(expectedUserId).finally(() => inFlight.delete(expectedUserId));
-  inFlight.set(expectedUserId, promise);
-  return promise;
+  const staleAfterMutation = (syncedGeneration.get(expectedUserId) ?? 0) < generation;
+  if (!force && !staleAfterMutation) {
+    const meta = await offlineDb.syncMeta.get(expectedUserId);
+    if (meta && Date.now() - Date.parse(meta.completedAt) < BOOTSTRAP_FRESH_MS) return meta;
+    // Another caller may have started a download while IndexedDB was being read.
+    if (inFlight.has(expectedUserId)) return ensureOfflineBootstrap(expectedUserId, force);
+  }
+
+  const entry: InFlightRefresh = {
+    generation,
+    promise: runBootstrap(expectedUserId)
+      .then((meta) => {
+        syncedGeneration.set(
+          expectedUserId,
+          Math.max(syncedGeneration.get(expectedUserId) ?? 0, generation)
+        );
+        return meta;
+      })
+      .finally(() => {
+        if (inFlight.get(expectedUserId) === entry) inFlight.delete(expectedUserId);
+      }),
+  };
+  inFlight.set(expectedUserId, entry);
+  return entry.promise;
 }
 

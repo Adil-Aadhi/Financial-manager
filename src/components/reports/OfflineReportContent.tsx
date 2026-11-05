@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { CalendarSearch } from "lucide-react";
 import { AccountReport } from "@/components/reports/AccountReport";
@@ -11,8 +10,9 @@ import { ReportOverview } from "@/components/reports/ReportOverview";
 import { Alert } from "@/components/ui/Alert";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { ensureOfflineBootstrap } from "@/lib/offline/bootstrap";
 import { offlineDb } from "@/lib/offline/db";
+import { useOfflineRefresh } from "@/lib/offline/useOfflineRefresh";
+import { useLocalContentMark } from "@/lib/perf";
 import {
   buildReport,
   type ReportData,
@@ -38,15 +38,7 @@ export function OfflineReportContent({
 }) {
   const serverVersion = `${range.start}:${range.end}:${serverReport.currency}:${serverReport.count}:${serverReport.income}:${serverReport.expense}`;
 
-  useEffect(() => {
-    if (!navigator.onLine) return;
-    void ensureOfflineBootstrap(ownerId, true).catch((error: unknown) => {
-      console.warn(
-        "Unable to refresh offline reports:",
-        error instanceof Error ? error.message : error
-      );
-    });
-  }, [ownerId, serverVersion]);
+  useOfflineRefresh(ownerId, serverVersion, "offline reports");
 
   const localReport = useLiveQuery(async () => {
     const meta = await offlineDb.syncMeta.get(ownerId);
@@ -98,6 +90,7 @@ export function OfflineReportContent({
       localDefaultCurrency
     );
   }, [defaultCurrency, ownerId, range.end, range.start, requestedCurrency]);
+  useLocalContentMark(localReport != null); // TEMPORARY perf (Step 3 Phase 0)
 
   const report = localReport ?? serverReport;
   const currency = report.currency as SupportedCurrency;

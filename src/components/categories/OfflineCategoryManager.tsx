@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Alert } from "@/components/ui/Alert";
 import { CategoryManager } from "@/components/categories/CategoryManager";
 import type { CategoryRecord } from "@/lib/categories";
 import { isCategoryType } from "@/lib/categories";
-import { ensureOfflineBootstrap } from "@/lib/offline/bootstrap";
 import { offlineDb } from "@/lib/offline/db";
+import { useOfflineRefresh } from "@/lib/offline/useOfflineRefresh";
+import { useLocalContentMark } from "@/lib/perf";
 import { useOnlineStatus } from "@/lib/offline/useOnlineStatus";
 
 export function OfflineCategoryManager({
@@ -22,15 +22,7 @@ export function OfflineCategoryManager({
     .map((category) => `${category.id}:${category.name}:${category.type}:${category.icon}`)
     .join("|");
 
-  useEffect(() => {
-    if (!isOnline) return;
-    void ensureOfflineBootstrap(ownerId, true).catch((error: unknown) => {
-      console.warn(
-        "Unable to refresh offline categories:",
-        error instanceof Error ? error.message : error
-      );
-    });
-  }, [isOnline, ownerId, serverVersion]);
+  useOfflineRefresh(ownerId, serverVersion, "offline categories");
 
   const localCategories = useLiveQuery(async () => {
     const meta = await offlineDb.syncMeta.get(ownerId);
@@ -58,6 +50,7 @@ export function OfflineCategoryManager({
           left.name.localeCompare(right.name)
       );
   }, [ownerId]);
+  useLocalContentMark(localCategories != null); // TEMPORARY perf (Step 3 Phase 0)
 
   return (
     <div className="space-y-4">
