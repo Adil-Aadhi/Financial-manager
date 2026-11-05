@@ -10,6 +10,7 @@ import { Alert } from "@/components/ui/Alert";
 import { UserAvatar } from "@/components/layout/UserAvatar";
 import { SupportedCurrency, Profile } from "@/lib/supabase/profile";
 import { updateProfile } from "@/app/actions/profile";
+import { markOfflineDataStale } from "@/lib/offline/bootstrap";
 import { useOnlineStatus } from "@/lib/offline/useOnlineStatus";
 
 interface ProfileSettingsFormProps {
@@ -58,6 +59,7 @@ export function ProfileSettingsForm({ initialProfile, userEmail }: ProfileSettin
       if (!res.success) {
         setErrorMessage(res.error || "Failed to update profile.");
       } else {
+        markOfflineDataStale();
         setSuccessMessage("Saved.");
         router.refresh();
       }

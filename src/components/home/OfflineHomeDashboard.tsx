@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo } from "react";
+import React, { useMemo } from "react";
 import Link from "next/link";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
@@ -19,8 +19,8 @@ import { Card, CardLink } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { cn } from "@/lib/cn";
 import { formatMoney } from "@/lib/format";
-import { ensureOfflineBootstrap } from "@/lib/offline/bootstrap";
 import { offlineDb } from "@/lib/offline/db";
+import { useOfflineRefresh } from "@/lib/offline/useOfflineRefresh";
 import type { MonthRange } from "@/lib/month";
 import type { SupportedCurrency } from "@/lib/supabase/profile";
 
@@ -73,15 +73,7 @@ export function OfflineHomeDashboard({
     `budget:${serverSnapshot.budget.limit}:${serverSnapshot.budget.spent}`,
   ].join("|");
 
-  useEffect(() => {
-    if (!navigator.onLine) return;
-    void ensureOfflineBootstrap(ownerId, true).catch((error: unknown) => {
-      console.warn(
-        "Unable to refresh the offline dashboard:",
-        error instanceof Error ? error.message : error
-      );
-    });
-  }, [ownerId, serverVersion]);
+  useOfflineRefresh(ownerId, serverVersion, "the offline dashboard");
 
   const localSnapshot = useLiveQuery(async () => {
     const meta = await offlineDb.syncMeta.get(ownerId);

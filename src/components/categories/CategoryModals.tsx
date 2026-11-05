@@ -19,6 +19,7 @@ import {
   type CategoryType,
 } from "@/lib/categories";
 import { cn } from "@/lib/cn";
+import { markOfflineDataStale } from "@/lib/offline/bootstrap";
 import { useOnlineStatus } from "@/lib/offline/useOnlineStatus";
 
 interface CategoryFormModalProps {
@@ -89,6 +90,7 @@ export function CategoryFormModal({
         return;
       }
 
+      markOfflineDataStale();
       if (!isEditing) {
         setName("");
         setType("income");
@@ -227,6 +229,7 @@ export function DeleteCategoryModal({
         setError(result.error ?? "Unable to delete this category.");
         return;
       }
+      markOfflineDataStale();
       onClose();
     });
   };

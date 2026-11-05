@@ -11,20 +11,37 @@ export interface Profile {
   updated_at?: string;
 }
 
+/** The verified identity a page needs, taken from the session's JWT claims. */
+export interface AuthenticatedUser {
+  id: string;
+  email?: string;
+  user_metadata: Record<string, unknown>;
+}
+
 /**
  * Fetches the authenticated user and their profile from public.profiles.
  * Handles missing profile records gracefully without exposing other profiles.
+ *
+ * Identity comes from getClaims(): the session's access token is refreshed if it has expired,
+ * then its expiry and signature are verified (locally with this project's ES256 signing keys,
+ * or through the Auth server with a symmetric key). This is for rendering pages only;
+ * Server Actions keep calling getUser() before any write, and RLS verifies the same JWT on
+ * every query below.
  */
 export async function getAuthenticatedUserProfile() {
   const supabase = await createClient();
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
+  const { data: claimsData, error: authError } = await supabase.auth.getClaims();
+  const claims = claimsData?.claims;
 
-  if (authError || !user) {
+  if (authError || !claims?.sub) {
     return { user: null, profile: null };
   }
+
+  const user: AuthenticatedUser = {
+    id: claims.sub,
+    email: claims.email,
+    user_metadata: claims.user_metadata ?? {},
+  };
 
   const { data: profile, error: profileError } = await supabase
     .from("profiles")

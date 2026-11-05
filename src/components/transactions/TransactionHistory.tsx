@@ -4,6 +4,7 @@ import React, { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarDays, Pencil, Search, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { deleteTransactionAction } from "@/app/actions/transactions";
+import { markOfflineDataStale } from "@/lib/offline/bootstrap";
 import { CategoryTile } from "@/components/categories/CategoryIcon";
 import { QuickTransactionModal } from "@/components/transactions/QuickTransactionModal";
 import { Alert } from "@/components/ui/Alert";
@@ -476,6 +477,7 @@ function DeleteTransactionModal({
         setError(result.error ?? "Unable to delete this transaction.");
         return;
       }
+      markOfflineDataStale();
       onClose();
       onDeleted();
       router.refresh();

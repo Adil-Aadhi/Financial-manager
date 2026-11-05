@@ -4,6 +4,7 @@ import React, { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Calendar, Clock3, RotateCcw, Trash2 } from "lucide-react";
 import { restoreAccountAction } from "@/app/actions/accounts";
+import { markOfflineDataStale } from "@/lib/offline/bootstrap";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -59,6 +60,7 @@ export function AccountTrashList({
       }
 
       setRestoringId(null);
+      markOfflineDataStale();
       router.refresh();
     });
   };

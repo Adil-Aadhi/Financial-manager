@@ -1,13 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
   AccountTrashList,
   type TrashedAccountListItem,
 } from "@/components/accounts/AccountTrashList";
-import { ensureOfflineBootstrap } from "@/lib/offline/bootstrap";
 import { offlineDb } from "@/lib/offline/db";
+import { useOfflineRefresh } from "@/lib/offline/useOfflineRefresh";
 import type { SupportedCurrency } from "@/lib/supabase/profile";
 
 export function OfflineAccountTrashList({
@@ -25,15 +24,7 @@ export function OfflineAccountTrashList({
     .map((account) => `${account.id}:${account.deleted_at}`)
     .join("|");
 
-  useEffect(() => {
-    if (!navigator.onLine) return;
-    void ensureOfflineBootstrap(ownerId, true).catch((error: unknown) => {
-      console.warn(
-        "Unable to refresh offline Trash:",
-        error instanceof Error ? error.message : error
-      );
-    });
-  }, [ownerId, serverVersion]);
+  useOfflineRefresh(ownerId, serverVersion, "offline Trash");
 
   const localAccounts = useLiveQuery(async () => {
     const meta = await offlineDb.syncMeta.get(ownerId);
