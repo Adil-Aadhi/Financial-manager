@@ -1,13 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import {
-  isCategoryIcon,
-  isCategoryType,
-  type CategoryIconName,
-  type CategoryType,
-} from "@/lib/categories";
+import { type CategoryIconName, type CategoryType } from "@/lib/categories";
+import { countCategoryUsage } from "@/lib/server/validation";
 import { createClient } from "@/lib/supabase/server";
+import { validateCategoryFields } from "@/lib/validation/rules";
 
 export interface CategoryActionInput {
   categoryId?: string;
@@ -22,14 +19,7 @@ export interface CategoryActionResult {
 }
 
 function validateCategoryInput(input: CategoryActionInput) {
-  const name = input.name.trim();
-
-  if (!name) return { error: "Category name is required." };
-  if (name.length > 50) return { error: "Category name must be 50 characters or fewer." };
-  if (!isCategoryType(input.type)) return { error: "Choose Income or Expense." };
-  if (!isCategoryIcon(input.icon)) return { error: "Choose a valid category icon." };
-
-  return { name };
+  return validateCategoryFields(input);
 }
 
 async function getCategoryActionContext() {
@@ -149,18 +139,12 @@ export async function deleteCategoryAction(
     return { success: false, error: "Only your custom categories can be deleted." };
   }
 
-  const { count, error: usageError } = await supabase
-    .from("transactions")
-    .select("id", { count: "exact", head: true })
-    .eq("category_id", categoryId)
-    .eq("user_id", user.id);
-
-  if (usageError) {
-    console.error("Database error checking category usage:", usageError.message);
+  const count = await countCategoryUsage(supabase, user.id, categoryId);
+  if (count === null) {
     return { success: false, error: "Unable to check whether this category is in use." };
   }
 
-  if ((count ?? 0) > 0) {
+  if (count > 0) {
     return {
       success: false,
       error: "This category is used by transactions and cannot be deleted.",

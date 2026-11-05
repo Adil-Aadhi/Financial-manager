@@ -6,6 +6,7 @@ import { ensureOfflineBootstrap } from "@/lib/offline/bootstrap";
 import { createClient } from "@/lib/supabase/client";
 import { offlineDb } from "@/lib/offline/db";
 import { setActiveOwnerId } from "@/lib/offline/activeOwner";
+import { requestSync, startSyncEngine } from "@/lib/offline/sync";
 
 // Keep this in sync with public/sw.js. A new worker version gets one fresh route-warm
 // signature without permanently disabling future warming.
@@ -21,6 +22,8 @@ const FIXED_OFFLINE_ROUTES = [
 
 export function OfflineDataProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
+    // Offline changes sync on app open, foreground, reconnect and after local saves.
+    startSyncEngine();
     const supabase = createClient();
     let cancelled = false;
     let authenticatedUserId: string | null = null;
@@ -120,6 +123,7 @@ export function OfflineDataProvider({ children }: { children: React.ReactNode })
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       if ((event === "SIGNED_IN" || event === "USER_UPDATED") && session?.user) {
+        requestSync(500);
         void bootstrap(session.user.id);
       }
       if (event === "SIGNED_OUT") {

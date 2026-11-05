@@ -104,6 +104,25 @@ export interface OutboxEntry {
   status: OutboxStatus;
   attempts: number;
   error: string | null;
+  /** Epoch ms before which a retryable failure shouldn't be resent (backoff). */
+  nextAttemptAt?: number;
+}
+
+/** A last-write-wins decision made during sync, kept until the user dismisses it. */
+export interface SyncConflictRecord {
+  id?: number;
+  ownerId: string;
+  opId: string;
+  entity: OutboxEntity;
+  entityId: string;
+  op: OutboxOperation;
+  /** kept-local: this device's later edit was applied. kept-server: a later edit from elsewhere was kept. */
+  outcome: "kept-local" | "kept-server";
+  serverUpdatedAt: string;
+  clientEditedAt: string;
+  /** Human description of the change, captured when it was synced. */
+  summary: string;
+  recordedAt: string;
 }
 
 class FinanceOfflineDatabase extends Dexie {
@@ -114,6 +133,7 @@ class FinanceOfflineDatabase extends Dexie {
   monthlyBudgets!: EntityTable<LocalMonthlyBudget, "ownerId">;
   syncMeta!: EntityTable<LocalSyncMeta, "ownerId">;
   outbox!: EntityTable<OutboxEntry, "seq">;
+  syncConflicts!: EntityTable<SyncConflictRecord, "id">;
 
   constructor() {
     super("finance-tracker-offline");
@@ -129,6 +149,10 @@ class FinanceOfflineDatabase extends Dexie {
     // v2 only adds the outbox; existing tables and rows are kept as they are.
     this.version(2).stores({
       outbox: "++seq, &opId, ownerId, [ownerId+entity+entityId], [ownerId+status]",
+    });
+    // v3 only adds the conflict log; the outbox and all other tables are unchanged.
+    this.version(3).stores({
+      syncConflicts: "++id, ownerId, opId",
     });
   }
 }

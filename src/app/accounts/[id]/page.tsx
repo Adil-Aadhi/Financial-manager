@@ -27,6 +27,8 @@ export async function generateMetadata({ params }: AccountPageProps): Promise<Me
   };
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function isTransactionType(value: string): value is TransactionType {
   return value === "income" || value === "expense";
 }
@@ -55,7 +57,11 @@ export default async function AccountDetailsPage({ params }: AccountPageProps) {
       .maybeSingle();
     accountData = legacyAccountResult.data;
   }
-  if (!accountData) notFound();
+  // An account created offline exists only on the device until it syncs. Render the page and
+  // let the client show the local copy (or "not found" if the device doesn't have it either).
+  const serverMissing = !accountData;
+  if (serverMissing && !UUID.test(id)) notFound();
+  accountData ??= { id, name: "Account", opening_balance: 0, currency: null, created_at: new Date(0).toISOString() };
 
   const withTimeResult = await supabase
     .from("transactions")
@@ -143,7 +149,11 @@ export default async function AccountDetailsPage({ params }: AccountPageProps) {
       <PageHeader
         eyebrow="Account Details"
         title={accountData.name}
-        description="Balance, totals, and complete transaction history."
+        description={
+          serverMissing
+            ? "Saved on this device. It appears in your account once it syncs."
+            : "Balance, totals, and complete transaction history."
+        }
       />
 
       <div className="space-y-4 sm:space-y-6">
@@ -159,6 +169,7 @@ export default async function AccountDetailsPage({ params }: AccountPageProps) {
           transactions={transactions}
           categories={categories}
           fallbackCurrency={profile.default_currency}
+          serverMissing={serverMissing}
         />
       </div>
     </AppShell>

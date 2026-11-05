@@ -5,6 +5,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { ArrowDownLeft, ArrowUpRight, Landmark } from "lucide-react";
 import { TransactionHistory } from "@/components/transactions/TransactionHistory";
 import { Card } from "@/components/ui/Card";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { cn } from "@/lib/cn";
 import { formatMoney } from "@/lib/format";
 import { offlineDb } from "@/lib/offline/db";
@@ -36,12 +37,15 @@ export function OfflineAccountDetails({
   transactions: serverTransactions,
   categories: serverCategories,
   fallbackCurrency,
+  serverMissing = false,
 }: {
   ownerId: string;
   account: OfflineAccountDetailsAccount;
   transactions: TransactionRecord[];
   categories: TransactionCategoryOption[];
   fallbackCurrency: SupportedCurrency;
+  /** The server has no such account (e.g. created offline, not synced yet): show only the local copy. */
+  serverMissing?: boolean;
 }) {
   const serverVersion = [
     serverAccount.id,
@@ -119,6 +123,19 @@ export function OfflineAccountDetails({
     };
   }, [ownerId, serverAccount.id]);
   useLocalContentMark(localSnapshot != null); // TEMPORARY perf (Step 3 Phase 0)
+
+  if (serverMissing && !localSnapshot) {
+    // undefined: still reading IndexedDB. null: this device doesn't have the account either.
+    return localSnapshot === undefined ? (
+      <div className="glass-strong glass-edge h-40 animate-pulse rounded-3xl" aria-hidden="true" />
+    ) : (
+      <EmptyState
+        icon={<Landmark className="h-5 w-5" />}
+        title="Account not found"
+        description="It may have been deleted, or it hasn't reached this device yet."
+      />
+    );
+  }
 
   const account = localSnapshot?.account ?? serverAccount;
   const transactions = localSnapshot?.transactions ?? serverTransactions;

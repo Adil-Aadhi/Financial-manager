@@ -1,8 +1,15 @@
 import "client-only";
 
 import { validateBudgetAmount } from "@/lib/budget";
-import { isCategoryIcon, isCategoryType } from "@/lib/categories";
+import { isCategoryType } from "@/lib/categories";
+import {
+  ACCOUNT_RESTORE_WINDOW_MS,
+  accountFieldsError,
+  transactionFieldsError,
+  validateCategoryFields,
+} from "@/lib/validation/rules";
 import { getActiveOwnerId } from "@/lib/offline/activeOwner";
+import { notifyOutboxChanged } from "@/lib/offline/events";
 import {
   offlineDb,
   type LocalAccount,
@@ -35,7 +42,7 @@ export interface MutationOutcome {
   queued: boolean;
 }
 
-const TEN_DAYS_IN_MS = 10 * 24 * 60 * 60 * 1000;
+const TEN_DAYS_IN_MS = ACCOUNT_RESTORE_WINDOW_MS;
 /** Transactions and the budget are never referenced by other records, so their queued
  * operations can be merged and moved to the end of the queue without breaking ordering. */
 const MOVABLE_ENTITIES = new Set<OutboxEntity>(["transaction", "budget"]);
@@ -81,7 +88,6 @@ export async function runMutation<R extends { success: boolean; error?: string }
   if (ownerId && (await shouldWriteLocally(ownerId))) {
     try {
       await local(ownerId);
-      return { success: true, queued: true };
     } catch (error) {
       if (error instanceof LocalMutationError) return { success: false, error: error.message, queued: true };
       console.error("Local mutation failed:", error);
@@ -91,6 +97,14 @@ export async function runMutation<R extends { success: boolean; error?: string }
         queued: true,
       };
     }
+    // Committed. Wake the sync engine (it sends ~2s later when online); a notification problem
+    // must never turn a saved change into a reported failure.
+    try {
+      notifyOutboxChanged();
+    } catch {
+      // The next app-open / foreground / online trigger syncs it instead.
+    }
+    return { success: true, queued: true };
   }
 
   try {
@@ -201,22 +215,9 @@ export interface LocalTransactionInput {
   remark?: string;
 }
 
-function isValidDate(value: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const parsed = new Date(`${value}T00:00:00Z`);
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
-}
-
 async function validateTransaction(ownerId: string, input: LocalTransactionInput) {
-  if (input.type !== "income" && input.type !== "expense") return "Choose Income or Expense.";
-  if (!Number.isFinite(input.amount) || input.amount <= 0) return "Amount must be greater than zero.";
-  if (!input.accountId) return "Choose an account.";
-  if (!input.categoryId) return "Choose a category.";
-  if (!isValidDate(input.transactionDate)) return "Choose a valid date.";
-  if (input.transactionTime && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(input.transactionTime)) {
-    return "Choose a valid time.";
-  }
-  if ((input.remark?.trim().length ?? 0) > 200) return "Remark must be 200 characters or fewer.";
+  const fieldError = transactionFieldsError(input);
+  if (fieldError) return fieldError;
 
   const [account, category] = await Promise.all([
     offlineDb.accounts.get([ownerId, input.accountId]),
@@ -360,8 +361,9 @@ export function updateAccountLocally(ownerId: string, input: { accountId: string
   return inLocalTransaction(async () => {
     await requireLocalSnapshot(ownerId);
     const name = input.name.trim();
-    if (!input.accountId || !name) throw new LocalMutationError("Account Name is required.");
-    if (!Number.isFinite(input.openingAmount)) throw new LocalMutationError("Enter a valid opening amount.");
+    if (!input.accountId) throw new LocalMutationError("Account Name is required.");
+    const fieldsError = accountFieldsError(input.name, input.openingAmount);
+    if (fieldsError) throw new LocalMutationError(fieldsError);
     const existing = await offlineDb.accounts.get([ownerId, input.accountId]);
     if (!existing || existing.deleted_at) throw new LocalMutationError("Account not found.");
 
@@ -412,11 +414,9 @@ export interface LocalCategoryInput {
 }
 
 async function validateCategory(ownerId: string, input: LocalCategoryInput) {
-  const name = input.name.trim();
-  if (!name) throw new LocalMutationError("Category name is required.");
-  if (name.length > 50) throw new LocalMutationError("Category name must be 50 characters or fewer.");
-  if (!isCategoryType(input.type)) throw new LocalMutationError("Choose Income or Expense.");
-  if (!isCategoryIcon(input.icon)) throw new LocalMutationError("Choose a valid category icon.");
+  const fields = validateCategoryFields(input);
+  if (fields.error || !fields.name) throw new LocalMutationError(fields.error ?? "Category name is required.");
+  const name = fields.name;
 
   // Same rule as the categories_user_name_type_unique index: case-insensitive per type,
   // among this user's own categories.

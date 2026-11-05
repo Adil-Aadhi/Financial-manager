@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { validateTransactionInput } from "@/lib/server/validation";
 import type {
   TransactionFormOptions,
   TransactionType,
@@ -31,16 +32,6 @@ function isTransactionType(value: string): value is TransactionType {
   return value === "income" || value === "expense";
 }
 
-function isValidDate(value: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const parsed = new Date(`${value}T00:00:00Z`);
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
-}
-
-function isValidTime(value: string) {
-  return /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value);
-}
-
 async function getTransactionContext() {
   const supabase = await createClient();
   const {
@@ -56,52 +47,6 @@ function revalidateTransactionViews(accountIds: string[]) {
   for (const accountId of new Set(accountIds)) {
     if (accountId) revalidatePath(`/accounts/${accountId}`);
   }
-}
-
-async function validateTransactionInput(
-  input: TransactionActionInput,
-  userId: string,
-  supabase: Awaited<ReturnType<typeof createClient>>
-) {
-  if (!isTransactionType(input.type)) return "Choose Income or Expense.";
-  if (!Number.isFinite(input.amount) || input.amount <= 0) {
-    return "Amount must be greater than zero.";
-  }
-  if (!input.accountId) return "Choose an account.";
-  if (!input.categoryId) return "Choose a category.";
-  if (!isValidDate(input.transactionDate)) return "Choose a valid date.";
-  if (input.transactionTime && !isValidTime(input.transactionTime)) {
-    return "Choose a valid time.";
-  }
-  if ((input.remark?.trim().length ?? 0) > 200) {
-    return "Remark must be 200 characters or fewer.";
-  }
-
-  const [accountResult, categoryResult] = await Promise.all([
-    supabase
-      .from("accounts")
-      .select("id")
-      .eq("id", input.accountId)
-      .eq("user_id", userId)
-      .is("deleted_at", null)
-      .maybeSingle(),
-    supabase
-      .from("categories")
-      .select("id")
-      .eq("id", input.categoryId)
-      .eq("type", input.type)
-      .or(`is_default.eq.true,user_id.eq.${userId}`)
-      .maybeSingle(),
-  ]);
-
-  if (accountResult.error || !accountResult.data) {
-    return "Choose one of your active accounts.";
-  }
-  if (categoryResult.error || !categoryResult.data) {
-    return "Choose an available category matching the transaction type.";
-  }
-
-  return null;
 }
 
 export async function getTransactionFormOptionsAction(): Promise<TransactionOptionsResult> {

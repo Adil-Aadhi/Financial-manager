@@ -23,6 +23,10 @@ export function getActiveOwnerId() {
   return activeOwnerId;
 }
 
+export function subscribeActiveOwner(listener: () => void) {
+  return subscribe(listener);
+}
+
 function subscribe(listener: () => void) {
   listeners.add(listener);
   return () => {
