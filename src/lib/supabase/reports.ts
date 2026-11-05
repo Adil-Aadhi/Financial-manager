@@ -17,8 +17,28 @@ export interface ReportSource {
 }
 
 const MISSING_FUNCTION_CODES = new Set(["42883", "PGRST202"]);
+/** Supabase's API returns at most 1,000 rows per request by default. */
+const ROLLUP_PAGE_SIZE = 1000;
 const FALLBACK_PAGE_SIZE = 1000;
 const FALLBACK_MAX_ROWS = 20_000;
+
+/**
+ * One page of get_report_rollup. Ordered by the full group key so paging is
+ * stable; the exact count tells us whether more pages exist.
+ */
+function rollupPage(
+  supabase: ServerClient,
+  range: Pick<ReportRange, "start" | "end">,
+  from: number
+) {
+  return supabase
+    .rpc("get_report_rollup", { p_start: range.start, p_end: range.end }, { count: "exact" })
+    .order("month")
+    .order("account_id")
+    .order("category_id")
+    .order("type")
+    .range(from, from + ROLLUP_PAGE_SIZE - 1);
+}
 
 /**
  * Without the reports migration: read only the columns needed, page by page,
@@ -60,10 +80,13 @@ async function fallbackRollup(
       groups.set(key, group);
     }
 
-    if (!data || data.length < FALLBACK_PAGE_SIZE) break;
+    if (!data || data.length < FALLBACK_PAGE_SIZE) return [...groups.values()];
   }
 
-  return [...groups.values()];
+  // Never return partial totals.
+  throw new Error(
+    `More than ${FALLBACK_MAX_ROWS} transactions in range; apply the reports migration.`
+  );
 }
 
 /** Rollup rows plus the account and category metadata needed to label them. */
@@ -73,7 +96,7 @@ export async function getReportSource(
   range: Pick<ReportRange, "start" | "end">
 ): Promise<ReportSource> {
   const [rollupResult, accountsResult, categoriesResult] = await Promise.all([
-    supabase.rpc("get_report_rollup", { p_start: range.start, p_end: range.end }),
+    rollupPage(supabase, range, 0),
     // All accounts, including ones in Trash: their history still counts.
     supabase.from("accounts").select("id, name, currency, deleted_at").eq("user_id", userId),
     supabase
@@ -105,6 +128,15 @@ export async function getReportSource(
     aggregatedInDatabase = false;
   } else {
     rows = (rollupResult.data ?? []) as ReportRollupRow[];
+    // Rare: more grouped rows than one page (long ranges, many categories).
+    const total = rollupResult.count ?? rows.length;
+    while (rows.length < total) {
+      const page = await rollupPage(supabase, range, rows.length);
+      if (page.error) throw new Error(page.error.message);
+      if (!page.data?.length) break;
+      rows = rows.concat(page.data as ReportRollupRow[]);
+    }
+    if (rows.length < total) throw new Error("Report data was incomplete; try again.");
   }
 
   return {
