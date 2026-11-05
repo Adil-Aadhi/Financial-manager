@@ -4,6 +4,8 @@ import { ThemeProvider } from "@/components/theme/ThemeProvider";
 import { themeInitScript } from "@/components/theme/theme-script";
 import { accentInitScript } from "@/components/theme/accent";
 import { timeZoneCookieScript } from "@/lib/month";
+import { OfflineDataProvider } from "@/components/offline/OfflineDataProvider";
+import { ServiceWorkerRegistration } from "@/components/pwa/ServiceWorkerRegistration";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -25,6 +27,20 @@ const manrope = Manrope({
 export const metadata: Metadata = {
   title: "FinanceTracker",
   description: "Track spending, budgets and savings goals with clarity.",
+  manifest: "/manifest.webmanifest",
+  applicationName: "FinanceTracker",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "FinanceTracker",
+  },
+  icons: {
+    icon: [
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
 };
 
 export const viewport: Viewport = {
@@ -47,7 +63,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <script dangerouslySetInnerHTML={{ __html: themeInitScript + ";" + accentInitScript + ";" + timeZoneCookieScript }} />
       </head>
       <body className="min-h-full flex flex-col">
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          <OfflineDataProvider>{children}</OfflineDataProvider>
+          <ServiceWorkerRegistration />
+        </ThemeProvider>
       </body>
     </html>
   );
