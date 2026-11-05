@@ -1,8 +1,9 @@
-// v3: network responses stream straight to the page; caching happens in the background.
+// v4: route warming is single-flight and bounded; runtime cache writes stay off the response path.
 // The private cache keeps its name on purpose: its contents are unchanged, and renaming it
 // would make activate() delete every route saved for offline use.
-const CACHE_VERSION = "finance-tracker-shell-v3";
+const CACHE_VERSION = "finance-tracker-shell-v4";
 const PRIVATE_CACHE_VERSION = "finance-tracker-private-v2";
+const ROUTE_CACHE_CONCURRENCY = 2;
 const OFFLINE_URL = "/offline";
 const PRECACHE_URLS = [
   OFFLINE_URL,
@@ -13,6 +14,9 @@ const PRECACHE_URLS = [
   "/icons/icon-maskable-512.png",
   "/icons/apple-touch-icon.png",
 ];
+const inFlightRouteCacheJobs = new Map();
+let privateCacheGeneration = 0;
+let privateCacheReset = Promise.resolve();
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_VERSION).then((cache) => cache.addAll(PRECACHE_URLS)));
@@ -38,10 +42,24 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("message", (event) => {
   if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
   if (event.data?.type === "CLEAR_PRIVATE_ROUTES") {
-    event.waitUntil(caches.delete(PRIVATE_CACHE_VERSION));
+    privateCacheGeneration += 1;
+    const previousReset = privateCacheReset;
+    const jobs = [...inFlightRouteCacheJobs.values()];
+    jobs.forEach((job) => job.controller.abort());
+    inFlightRouteCacheJobs.clear();
+    privateCacheReset = Promise.allSettled([previousReset, ...jobs.map((job) => job.promise)])
+      .then(() => caches.delete(PRIVATE_CACHE_VERSION))
+      .then(() => undefined);
+    event.waitUntil(privateCacheReset);
   }
   if (event.data?.type === "CACHE_ROUTES" && Array.isArray(event.data.routes)) {
-    event.waitUntil(cacheRoutes(event.data.routes));
+    const generation = privateCacheGeneration;
+    event.waitUntil(
+      privateCacheReset.then(() => {
+        if (generation !== privateCacheGeneration) return;
+        return getRouteCacheJob(event.data.routes, generation);
+      })
+    );
   }
 });
 
@@ -84,52 +102,102 @@ async function networkFirst(event, request, fallbackToOffline = true, cacheName 
   }
 }
 
-async function cacheRoutes(routes) {
-  const cache = await caches.open(PRIVATE_CACHE_VERSION);
-  const safeRoutes = [...new Set(routes)].filter(
-    (route) => typeof route === "string" && route.startsWith("/") && !route.startsWith("//")
-  );
-
-  await Promise.all(
-    safeRoutes.map(async (route) => {
-      try {
-        const request = new Request(route, {
-          credentials: "include",
-          headers: { Accept: "text/html" },
-        });
-        const response = await fetch(request);
-        if (!response.ok || response.redirected) return;
-        await cache.put(request, response.clone());
-
-        const html = await response.text();
-        const assets = [...html.matchAll(/(?:src|href)=["']([^"']+\.(?:js|css))(?:\?[^"']*)?["']/g)]
-          .map((match) => match[1])
-          .filter((url) => url.startsWith("/"));
-        await Promise.all(
-          [...new Set(assets)].map(async (asset) => {
-            const assetResponse = await fetch(asset);
-            if (assetResponse.ok) await cache.put(asset, assetResponse);
-          })
-        );
-      } catch {
-        // The route remains available through its existing runtime cache.
-      }
-    })
-  );
+function safeSortedRoutes(routes) {
+  return [...new Set(routes)]
+    .filter(
+      (route) => typeof route === "string" && route.startsWith("/") && !route.startsWith("//")
+    )
+    .sort();
 }
 
-async function cacheFirst(request) {
+function getRouteCacheJob(routes, generation) {
+  const safeRoutes = safeSortedRoutes(routes);
+  const signature = safeRoutes.join("\n");
+  const current = inFlightRouteCacheJobs.get(signature);
+  if (current) return current.promise;
+
+  const controller = new AbortController();
+  const entry = {
+    controller,
+    promise: cacheRoutes(safeRoutes, generation, controller.signal).finally(() => {
+      if (inFlightRouteCacheJobs.get(signature) === entry) {
+        inFlightRouteCacheJobs.delete(signature);
+      }
+    }),
+  };
+  inFlightRouteCacheJobs.set(signature, entry);
+  return entry.promise;
+}
+
+async function runWithConcurrency(items, worker) {
+  let nextIndex = 0;
+  const workerCount = Math.min(ROUTE_CACHE_CONCURRENCY, items.length);
+
+  const runWorker = async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      await worker(items[index]);
+    }
+  };
+
+  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+}
+
+async function cacheRoutes(safeRoutes, generation, signal) {
+  const cache = await caches.open(PRIVATE_CACHE_VERSION);
+  const assets = new Set();
+
+  await runWithConcurrency(safeRoutes, async (route) => {
+    try {
+      if (generation !== privateCacheGeneration) return;
+      const request = new Request(route, {
+        credentials: "include",
+        headers: { Accept: "text/html" },
+        signal,
+      });
+      const response = await fetch(request);
+      if (!response.ok || response.redirected || generation !== privateCacheGeneration) return;
+
+      const html = await response.clone().text();
+      if (generation !== privateCacheGeneration) return;
+      await cache.put(request, response);
+
+      for (const match of html.matchAll(
+        /(?:src|href)=["']([^"']+\.(?:js|css|woff2?|png|jpe?g|webp|avif|svg|ico))(?:\?[^"']*)?["']/gi
+      )) {
+        const asset = match[1];
+        if (asset.startsWith("/") && !asset.startsWith("//")) assets.add(asset);
+      }
+    } catch {
+      // The route remains available through its existing runtime cache.
+    }
+  });
+
+  await runWithConcurrency([...assets].sort(), async (asset) => {
+    try {
+      if (generation !== privateCacheGeneration) return;
+      const response = await fetch(new Request(asset, { credentials: "include", signal }));
+      if (response.ok && generation === privateCacheGeneration) {
+        await cache.put(asset, response);
+      }
+    } catch {
+      // A later runtime request can still cache this asset.
+    }
+  });
+}
+
+async function cacheFirst(request, cacheWork) {
   const cache = await caches.open(CACHE_VERSION);
   const privateCache = await caches.open(PRIVATE_CACHE_VERSION);
   const cached = (await cache.match(request)) || (await privateCache.match(request));
   if (cached) return cached;
   const response = await fetch(request);
   if (response.ok) {
-    try {
-      await cache.put(request, response.clone());
-    } catch {
+    const copy = response.clone();
+    cacheWork.promise = cache.put(request, copy).catch(() => {
       // Return the response even when a browser declines to cache it.
-    }
+    });
   }
   return response;
 }
@@ -158,7 +226,12 @@ self.addEventListener("fetch", (event) => {
     url.pathname.startsWith("/icons/") ||
     /\.(?:css|js|woff2|png|svg)$/.test(url.pathname)
   ) {
-    event.respondWith(cacheFirst(request));
+    const cacheWork = { promise: Promise.resolve() };
+    const response = cacheFirst(request, cacheWork);
+    event.respondWith(response);
+    // Register the lifetime extension synchronously for Safari. cacheFirst assigns the real
+    // write before its response promise resolves, so the response itself does not await it.
+    event.waitUntil(response.then(() => cacheWork.promise));
   }
 });
 
