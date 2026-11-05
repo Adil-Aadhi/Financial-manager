@@ -21,6 +21,7 @@ import { cn } from "@/lib/cn";
 import { formatMoney } from "@/lib/format";
 import { offlineDb } from "@/lib/offline/db";
 import { useOfflineRefresh } from "@/lib/offline/useOfflineRefresh";
+import { useLocalContentMark } from "@/lib/perf";
 import type { MonthRange } from "@/lib/month";
 import type { SupportedCurrency } from "@/lib/supabase/profile";
 
@@ -134,6 +135,7 @@ export function OfflineHomeDashboard({
 
     return { snapshot, currency: localCurrency };
   }, [currency, month.prefix, ownerId]);
+  useLocalContentMark(localSnapshot != null); // TEMPORARY perf (Step 3 Phase 0)
 
   return (
     <HomeDashboard

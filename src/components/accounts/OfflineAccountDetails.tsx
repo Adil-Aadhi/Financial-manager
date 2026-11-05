@@ -9,6 +9,7 @@ import { cn } from "@/lib/cn";
 import { formatMoney } from "@/lib/format";
 import { offlineDb } from "@/lib/offline/db";
 import { useOfflineRefresh } from "@/lib/offline/useOfflineRefresh";
+import { useLocalContentMark } from "@/lib/perf";
 import type { SupportedCurrency } from "@/lib/supabase/profile";
 import {
   normalizeTransactionDate,
@@ -117,6 +118,7 @@ export function OfflineAccountDetails({
       categories,
     };
   }, [ownerId, serverAccount.id]);
+  useLocalContentMark(localSnapshot != null); // TEMPORARY perf (Step 3 Phase 0)
 
   const account = localSnapshot?.account ?? serverAccount;
   const transactions = localSnapshot?.transactions ?? serverTransactions;

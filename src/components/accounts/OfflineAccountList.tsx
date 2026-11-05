@@ -7,6 +7,7 @@ import { AccountList, type AccountListItem } from "@/components/accounts/Account
 import { EmptyState } from "@/components/ui/EmptyState";
 import { offlineDb } from "@/lib/offline/db";
 import { useOfflineRefresh } from "@/lib/offline/useOfflineRefresh";
+import { useLocalContentMark } from "@/lib/perf";
 import type { SupportedCurrency } from "@/lib/supabase/profile";
 
 export function OfflineAccountList({
@@ -58,6 +59,7 @@ export function OfflineAccountList({
         total_expense: totalsByAccount.get(account.id)?.expense ?? 0,
       }));
   }, [ownerId]);
+  useLocalContentMark(localAccounts != null); // TEMPORARY perf (Step 3 Phase 0)
 
   const accounts = localAccounts ?? serverAccounts;
   if (accounts.length === 0) {

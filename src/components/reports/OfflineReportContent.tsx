@@ -12,6 +12,7 @@ import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { offlineDb } from "@/lib/offline/db";
 import { useOfflineRefresh } from "@/lib/offline/useOfflineRefresh";
+import { useLocalContentMark } from "@/lib/perf";
 import {
   buildReport,
   type ReportData,
@@ -89,6 +90,7 @@ export function OfflineReportContent({
       localDefaultCurrency
     );
   }, [defaultCurrency, ownerId, range.end, range.start, requestedCurrency]);
+  useLocalContentMark(localReport != null); // TEMPORARY perf (Step 3 Phase 0)
 
   const report = localReport ?? serverReport;
   const currency = report.currency as SupportedCurrency;

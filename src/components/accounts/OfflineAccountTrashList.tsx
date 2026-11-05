@@ -7,6 +7,7 @@ import {
 } from "@/components/accounts/AccountTrashList";
 import { offlineDb } from "@/lib/offline/db";
 import { useOfflineRefresh } from "@/lib/offline/useOfflineRefresh";
+import { useLocalContentMark } from "@/lib/perf";
 import type { SupportedCurrency } from "@/lib/supabase/profile";
 
 export function OfflineAccountTrashList({
@@ -54,6 +55,7 @@ export function OfflineAccountTrashList({
       .sort((left, right) => right.deleted_at.localeCompare(left.deleted_at));
     return { accounts, currency: localCurrency };
   }, [ownerId]);
+  useLocalContentMark(localAccounts != null); // TEMPORARY perf (Step 3 Phase 0)
 
   return (
     <AccountTrashList

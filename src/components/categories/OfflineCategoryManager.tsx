@@ -7,6 +7,7 @@ import type { CategoryRecord } from "@/lib/categories";
 import { isCategoryType } from "@/lib/categories";
 import { offlineDb } from "@/lib/offline/db";
 import { useOfflineRefresh } from "@/lib/offline/useOfflineRefresh";
+import { useLocalContentMark } from "@/lib/perf";
 import { useOnlineStatus } from "@/lib/offline/useOnlineStatus";
 
 export function OfflineCategoryManager({
@@ -49,6 +50,7 @@ export function OfflineCategoryManager({
           left.name.localeCompare(right.name)
       );
   }, [ownerId]);
+  useLocalContentMark(localCategories != null); // TEMPORARY perf (Step 3 Phase 0)
 
   return (
     <div className="space-y-4">
