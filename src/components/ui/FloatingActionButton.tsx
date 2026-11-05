@@ -14,8 +14,9 @@ export interface FloatingActionButtonProps {
 /**
  * Reusable Floating Action Button (FAB).
  * Adapts its action and label dynamically to the current page / context:
- * - On /transactions -> opens Add Account modal
- * - On /accounts/[id] -> opens Quick Transaction Entry modal with account selected
+ * - On /transactions -> opens Add Transaction modal
+ * - On /categories -> opens Add Category modal
+ * - On /accounts/[id] -> opens Add Transaction with the account selected
  *
  * Desktop only (lg+). On mobile the same action is the raised + in BottomNav.
  */

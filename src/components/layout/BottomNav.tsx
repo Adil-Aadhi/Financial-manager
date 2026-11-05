@@ -47,9 +47,7 @@ export function BottomNav() {
   }, [isMoreOpen]);
 
   const isMoreActive =
-    isActivePath(pathname, "/settings") ||
-    isActivePath(pathname, "/trash") ||
-    isMoreOpen;
+    MORE_NAV_ITEMS.some(({ href }) => isActivePath(pathname, href)) || isMoreOpen;
 
   const renderTab = ({
     label,

@@ -30,7 +30,7 @@ export function AppShell({ userName, userEmail, currency, children }: AppShellPr
         <AuroraBackground />
 
         <header className="sticky top-0 z-40 px-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-6">
-          <div className="glass-strong glass-edge mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 rounded-2xl pl-3 pr-2.5 sm:pl-4">
+          <div className="glass-strong glass-edge mx-auto flex h-14 max-w-6xl items-center justify-between gap-3 rounded-2xl pl-3 pr-2 sm:h-16 sm:pl-4 sm:pr-2.5">
             <BrandLogo size="sm" />
 
             <TopNav />
@@ -50,7 +50,7 @@ export function AppShell({ userName, userEmail, currency, children }: AppShellPr
           </div>
         </header>
 
-        <main className="mx-auto w-full max-w-6xl px-4 pb-[calc(7rem+env(safe-area-inset-bottom))] pt-6 sm:px-6 lg:pb-12 lg:pt-8">
+        <main className="mx-auto w-full max-w-6xl px-4 pb-[calc(7rem+env(safe-area-inset-bottom))] pt-4 sm:px-6 sm:pt-6 lg:pb-12 lg:pt-8">
           {children}
         </main>
 
@@ -76,13 +76,13 @@ export function PageHeader({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="mb-6 flex items-end justify-between gap-4">
+    <div className="mb-4 flex items-end justify-between gap-3 sm:mb-6 sm:gap-4">
       <div className="min-w-0">
-        {eyebrow && <p className="text-xs font-medium text-fg-subtle">{eyebrow}</p>}
-        <h1 className="truncate text-[26px] font-semibold leading-tight tracking-tight text-fg sm:text-[28px]">
+        {eyebrow && <p className="text-[11px] font-medium text-fg-subtle sm:text-xs">{eyebrow}</p>}
+        <h1 className="truncate text-[22px] font-semibold leading-tight tracking-tight text-fg sm:text-[28px]">
           {title}
         </h1>
-        {description && <p className="mt-1 text-sm text-fg-muted">{description}</p>}
+        {description && <p className="mt-1 hidden text-sm text-fg-muted sm:block">{description}</p>}
       </div>
       {action}
     </div>

@@ -3,6 +3,7 @@ import {
   Home,
   ReceiptText,
   Settings,
+  Tags,
   Trash2,
   type LucideIcon,
 } from "lucide-react";
@@ -17,6 +18,7 @@ export interface NavItem {
 export const DESKTOP_NAV_ITEMS: NavItem[] = [
   { label: "Home", href: "/home", icon: Home },
   { label: "Transactions", href: "/transactions", icon: ReceiptText },
+  { label: "Categories", href: "/categories", icon: Tags },
   { label: "Reports", href: "/reports", icon: BarChart3 },
   { label: "Trash", href: "/trash", icon: Trash2 },
   { label: "Settings", href: "/settings", icon: Settings },
@@ -35,6 +37,7 @@ export const MOBILE_RIGHT_NAV_ITEMS: NavItem[] = [
 
 /** Items inside the mobile "More" menu. */
 export const MORE_NAV_ITEMS: NavItem[] = [
+  { label: "Categories", href: "/categories", icon: Tags },
   { label: "Settings", href: "/settings", icon: Settings },
   { label: "Trash", href: "/trash", icon: Trash2 },
 ];

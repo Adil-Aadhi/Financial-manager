@@ -110,6 +110,25 @@
   --shadow-glow: 0 10px 34px -10px oklch(0.77 var(--accent-c) var(--accent-h) / 0.6);
 }
 
+/* Category palette: fixed gradient pairs, same in both themes (white glyph on top).
+   Consumed only through the `cat-tile` utility / <CategoryTile />. */
+:root {
+  --cat-orange-1: #fb923c;  --cat-orange-2: #f43f5e;
+  --cat-blue-1: #60a5fa;    --cat-blue-2: #6366f1;
+  --cat-pink-1: #f472b6;    --cat-pink-2: #c026d3;
+  --cat-amber-1: #fbbf24;   --cat-amber-2: #f97316;
+  --cat-teal-1: #2dd4bf;    --cat-teal-2: #0891b2;
+  --cat-rose-1: #fb7185;    --cat-rose-2: #e11d48;
+  --cat-indigo-1: #818cf8;  --cat-indigo-2: #4f46e5;
+  --cat-violet-1: #a78bfa;  --cat-violet-2: #7c3aed;
+  --cat-sky-1: #38bdf8;     --cat-sky-2: #2563eb;
+  --cat-fuchsia-1: #e879f9; --cat-fuchsia-2: #a21caf;
+  --cat-emerald-1: #34d399; --cat-emerald-2: #059669;
+  --cat-cyan-1: #22d3ee;    --cat-cyan-2: #0e7490;
+  --cat-green-1: #4ade80;   --cat-green-2: #15803d;
+  --cat-slate-1: #94a3b8;   --cat-slate-2: #475569;
+}
+
 /* Map raw tokens to Tailwind utilities: bg-canvas, text-fg, border-line ... */
 @theme inline {
   --color-canvas: var(--canvas);
@@ -145,6 +164,12 @@
   --animate-aurora: aurora 22s ease-in-out infinite alternate;
   --animate-float: float 7s ease-in-out infinite;
   --animate-shake: shake 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+  --animate-sheet: sheet 0.38s cubic-bezier(0.22, 1, 0.36, 1) both;
+
+  @keyframes sheet {
+    from { transform: translateY(100%); }
+    to { transform: none; }
+  }
 
   @keyframes rise {
     from { opacity: 0; transform: translateY(14px) scale(0.985); }
@@ -223,6 +248,40 @@
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+}
+
+/* Money font: Manrope with tabular figures so columns of amounts line up. */
+@utility font-money {
+  font-family: var(--font-manrope), var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum", "lnum";
+}
+
+/* Glossy category tile. Set --tile-from / --tile-to (see <CategoryTile />). */
+@utility cat-tile {
+  color: #fff;
+  background-image: linear-gradient(140deg, var(--tile-from), var(--tile-to));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.45),
+    inset 0 -1px 0 rgb(0 0 0 / 0.08),
+    0 8px 18px -8px var(--tile-to);
+}
+
+/* Solid category colour (legend dots, spend bars). */
+@utility cat-fill {
+  background-image: linear-gradient(90deg, var(--tile-from), var(--tile-to));
+}
+
+/* Recessed segmented-control track on glass. */
+@utility glass-track {
+  background-color: var(--glass-input);
+  border: 1px solid var(--line);
+}
+
+/* Hide scrollbars on horizontal chip rows (still scrollable). */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar { display: none; }
 }
 
 /* Brand gradient fill (primary buttons, logo mark, progress). */

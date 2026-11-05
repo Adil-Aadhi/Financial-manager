@@ -8,6 +8,7 @@ export async function updateSession(request: NextRequest) {
   const protectedRoutes = [
     "/home",
     "/transactions",
+    "/categories",
     "/reports",
     "/settings",
     "/accounts",

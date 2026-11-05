@@ -75,10 +75,23 @@ primitives) rather than hard-coding one-off styles, then document the addition h
 
 Opacity modifiers work on all tokens (`bg-accent/12`, `border-danger/60`).
 
+### Category colours
+
+Every category gets a fixed gradient pair from the `--cat-{name}-1/2` palette in `globals.css`
+(orange, blue, pink, amber, teal, rose, indigo, violet, sky, fuchsia, emerald, cyan, green, slate).
+The colour comes from the category's icon (`categoryColor(icon)` in `CategoryIcon.tsx`), so it is the
+same in both themes and needs no database column.
+
+- Render categories with `<CategoryTile icon size="sm|md|lg" />`: a glossy gradient tile with a white glyph
+  (`cat-tile` utility). Never draw a category as a plain tinted box.
+- For bars and legend dots, spread `categoryStyle(icon)` into `style` and use the `cat-fill` utility.
+- To mark the selected tile, add `outline-2 outline-offset-2 outline-(--tile-from)`.
+- Category colours are for categories only. Money stays `positive` / `danger`.
+
 **Money colours:** income and positive deltas use `text-positive` (always green), expenses and negative
 deltas use `text-danger` (always red), and neutral amounts use `text-fg`. Never use `accent` for money,
-because the accent can be red or orange. Always render amounts with `font-mono`
-(Geist Mono) so digits line up.
+because the accent can be red or orange. Always render amounts with `font-money`
+(Manrope, tabular figures) so digits line up. Hero amounts use `font-bold`.
 
 ---
 
@@ -90,6 +103,9 @@ because the accent can be red or orange. Always render amounts with `font-mono`
 | `glass-strong` | Primary focus surface: auth card, modals, sheets, the main dashboard card |
 | `glass-edge` | Add to either one for a light-catching gradient rim (uses `::before`) |
 | `bg-brand` | Brand gradient fill: primary buttons, logo mark, progress bars |
+| `glass-track` | Recessed fill for segmented controls, pill inputs and chip tracks inside glass |
+| `cat-tile` / `cat-fill` | Category gradient tile / bar (see Category colours) |
+| `no-scrollbar` | Horizontal chip rows that scroll without a visible bar |
 | `text-gradient` | Gradient text for hero highlights and the wordmark. Use sparingly. |
 
 Example card:
@@ -133,7 +149,8 @@ Rules:
 
 ## 6. Typography
 
-- Font: **Geist** (`font-sans`), with **Geist Mono** (`font-mono`) for all numbers, amounts and codes.
+- Font: **Geist** (`font-sans`). **Manrope** (`font-money`, tabular figures) for every money amount.
+  **Geist Mono** (`font-mono`) only for codes: OTP cells, currency codes, countdowns.
 - Page or card title: `text-[26px] font-semibold tracking-tight text-fg`
 - Hero headline: `text-4xl xl:text-5xl font-semibold tracking-tight leading-[1.1]`
 - Section title: `text-lg font-semibold tracking-tight text-fg`
@@ -154,6 +171,7 @@ Defined as Tailwind animations in `globals.css`:
 | `animate-fade` | Inline helper and error text appearing |
 | `animate-float` | Decorative floating chips (marketing/illustration only) |
 | `animate-shake` | Invalid OTP / failed submission feedback |
+| `animate-sheet` | Bottom sheet sliding up (Modal on mobile) |
 | `animate-aurora` | Background blobs only |
 
 Keep durations between 150 and 300ms for interactions. `prefers-reduced-motion` disables
@@ -169,6 +187,7 @@ Use these; don't re-style raw elements.
 |---|---|
 | `Button` | `variant: primary \| secondary \| outline \| ghost \| danger`, `size`, `isLoading`, `leftIcon`, `rightIcon`. Exports `buttonBase`, `buttonVariants` and `buttonSizes` for styling a `<Link>` as a button. |
 | `Input` | `label`, `error`, `helperText`, `leftIcon`, `rightElement`, `labelAction` (right side of the label row) |
+| `Select` | Native mobile-friendly select with `label`, `error` and `helperText`. |
 | `PasswordInput` | `Input` with a lock icon and a show/hide toggle |
 | `PasswordStrength` | `password`: four-segment meter for new-password fields |
 | `Checkbox` | `label`, `description` |
@@ -178,7 +197,8 @@ Use these; don't re-style raw elements.
 | `ThemeToggle` | Light / Dark / System segmented control |
 | `AccentPicker` | Preset colour swatches + custom colour picker |
 | `AppearanceMenu` | Palette button with a popover containing `ThemeToggle` and `AccentPicker`. Used in every top bar. |
-| `Modal` | `isOpen`, `onClose`, `title`, `description`, `size: sm \| md \| lg`. Portalled glass-strong dialog with backdrop blur and escape dismissal. |
+| `Modal` | `isOpen`, `onClose`, `title`, `description`, `size: sm \| md \| lg`. Portalled glass-strong surface: a **bottom sheet** below `sm` (grabber, `animate-sheet`, safe-area padding, max 92dvh, scrolls) and a centred dialog from `sm` up. Escape and backdrop dismiss. |
+| `CategoryTile` | `icon`, `size: sm \| md \| lg`. Glossy gradient category tile (see Category colours). |
 | `FloatingActionButton` | `onClick`, `label`, `showOnMobile`. Context-aware floating action button (FAB) for page-level primary flows. |
 
 Auth-specific (`src/components/auth`): `AuthLayout` (centered glass card; `title` is
@@ -214,15 +234,41 @@ Icons: `lucide-react`, sized `h-4 w-4` inside controls and `h-5 w-5` in icon til
 
 ## 9. Patterns
 
+- **Mobile first (iPhone PWA).** Design at 375px, then scale up with `sm:`. On mobile use page
+  titles `text-[22px]`, card padding `p-4`, `space-y-4` between cards, and hide page descriptions
+  (`hidden sm:block`). Text inputs must be `text-base` (16px) below `sm`, or iOS zooms in on focus.
+- **Add / edit transaction** is a bottom sheet: Expense/Income pill switch, big centred `font-mono`
+  amount, account chips, a 4-column `CategoryTile` grid, date/time pills, a one-line note, and one
+  full-width Save button. Edit mode adds a delete button beside Save.
+- **Transaction lists** are grouped by day (`Today`, `Yesterday`, `Mon, 3 Nov`) with a signed day total.
+  Each row is `CategoryTile` · title · meta · signed amount. Tapping a row opens the edit sheet.
+  Desktop also shows hover edit/delete icons.
+
 - **Forms:** validate on submit, clear a field's error as the user types, show the server
   error in an `Alert` at the top of the form, and keep the primary CTA full-width at the bottom.
 - **Multi-step flows:** `StepIndicator`, then `AuthStepHeader`, then content, with the wrapper
   re-keyed by step so `animate-rise` plays on each transition.
 - **Links:** `font-semibold text-accent hover:text-accent-strong underline-offset-4 hover:underline`.
 - **Dividers:** `border-t border-line`.
-- **Dashboard:** a balance hero (`glass-strong`, big `font-mono` total, month Income / Expenses / Saved
-  tiles), then a 2/3 + 1/3 grid: Recent transactions and Cash flow on the left; Accounts and Top
-  spending on the right. On mobile it is one column in that order.
+- **Dashboard:** a balance hero (`glass-strong`, big `font-money` total, month Income / Expenses / Saved
+  tiles), then the **Monthly budget** card, then a 2/3 + 1/3 grid: Recent transactions and Cash flow on
+  the left; Accounts and Top spending on the right. On mobile it is one column in that order.
+- **Monthly budget card** (`components/budget/MonthlyBudgetCard`): same `glass-strong` hero shell as the
+  balance card. The hero figure is *Left to spend* (or *Over budget by* in `danger`), then a progress bar
+  and Spent / Budget limit tiles. Bar and status colour: `positive` below 75%, `warning` from 75%,
+  `warning`→`danger` from 90%, `danger` at 100% or more. Status rules and copy live in `lib/budget.ts`.
+  Never show a negative "remaining". The empty state sits inside the same card with one Set Budget button.
+- **Reports** (`/reports`, `components/reports/*`): one filter row (period chips + optional currency
+  switch) above everything it scopes; filter changes keep the old render at 50% opacity instead of a
+  skeleton. Order: 4 stat tiles (Income, Expenses, Savings, Net cash flow), Monthly comparison
+  (income vs expense columns on one axis, a savings strip below, tap a month for figures, "Show as
+  table"), Expense and Income breakdowns (thin segmented bar + ranked `CategoryTile` rows; no donuts),
+  then By account. Charts are hand-built HTML (no chart library). All numbers come from
+  `buildReport()` in `lib/reports.ts`, for **one currency at a time**. Never sum different currencies.
+- **Touch-safe hover:** chart hover handlers use `onPointerEnter` with `pointerType === "mouse"` so a tap
+  on iPhone doesn't fire hover and click together.
+- **Local month:** month-based figures use the user's calendar month: `getMonthRange()` from
+  `lib/month.ts` with the `ft-tz` cookie (set in `<head>`). Never hard-code a time zone in a page.
 - **Never show fake numbers.** Until a feature exists, show zeros and an `EmptyState`.
 - **Empty or illustrative data:** label sample figures clearly (e.g. a "Sample" badge).
   Never present invented statistics as real.
@@ -239,7 +285,9 @@ Icons: `lucide-react`, sized `h-4 w-4` inside controls and `h-5 w-5` in icon til
 - [ ] Looks right in Light, Dark and System, with no theme flash on reload
 - [ ] Works at 360px width with no horizontal scroll
 - [ ] Keyboard: focus ring visible, tab order logical, Enter submits
-- [ ] Amounts use `font-mono`; positive values use `accent`, negative values use `danger`
+- [ ] Amounts use `font-money`; income uses `positive`, expenses use `danger`
+- [ ] Categories render as `CategoryTile`, not tinted boxes
+- [ ] Inputs are 16px on mobile (no iOS focus zoom)
 - [ ] Uses existing primitives; any new primitive is added to section 8
 
 ## Migration status

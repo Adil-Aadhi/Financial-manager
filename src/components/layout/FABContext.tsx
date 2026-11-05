@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useMemo } from "react";
 import { usePathname } from "next/navigation";
 import { AddAccountModal } from "@/components/accounts/AddAccountModal";
 import { QuickTransactionModal } from "@/components/transactions/QuickTransactionModal";
+import { AddCategoryModal } from "@/components/categories/CategoryModals";
 
 export interface AccountContextData {
   id?: string;
@@ -13,10 +14,11 @@ export interface AccountContextData {
 interface FABContextType {
   triggerAction: () => void;
   openAddAccount: () => void;
+  openAddCategory: () => void;
   openQuickTransaction: (account?: AccountContextData) => void;
   activeAccount: AccountContextData | null;
   setActiveAccount: (account: AccountContextData | null) => void;
-  actionType: "add-account" | "quick-transaction";
+  actionType: "quick-transaction" | "add-category";
   fabLabel: string;
   fabTooltip: string;
 }
@@ -27,41 +29,44 @@ export function FABProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
   const [isAddAccountOpen, setIsAddAccountOpen] = useState(false);
+  const [isAddCategoryOpen, setIsAddCategoryOpen] = useState(false);
   const [isQuickTransactionOpen, setIsQuickTransactionOpen] = useState(false);
   const [activeAccount, setActiveAccount] = useState<AccountContextData | null>(null);
 
   // Determine page context dynamically from route or active account
   const isAccountDetailsPage = pathname.startsWith("/accounts/") && pathname !== "/accounts";
   const isTransactionsPage = pathname === "/transactions" || pathname.startsWith("/transactions/");
+  const isCategoriesPage = pathname === "/categories" || pathname.startsWith("/categories/");
 
-  const actionType: "add-account" | "quick-transaction" = useMemo(() => {
+  const actionType: "quick-transaction" | "add-category" = useMemo(() => {
+    if (isCategoriesPage) return "add-category";
     if (isAccountDetailsPage) return "quick-transaction";
-    if (isTransactionsPage) return "add-account";
-    // Default fallback
-    return activeAccount ? "quick-transaction" : "add-account";
-  }, [isAccountDetailsPage, isTransactionsPage, activeAccount]);
+    if (isTransactionsPage) return "quick-transaction";
+    return "quick-transaction";
+  }, [isAccountDetailsPage, isCategoriesPage, isTransactionsPage]);
 
   const fabLabel = useMemo(() => {
-    if (actionType === "add-account") return "Add Account";
+    if (actionType === "add-category") return "Add Category";
     if (actionType === "quick-transaction") return "New Transaction";
     return "New";
   }, [actionType]);
 
   const fabTooltip = useMemo(() => {
-    if (actionType === "add-account") return "Open Add Account modal";
-    if (actionType === "quick-transaction") return "Open Quick Transaction Entry";
+    if (actionType === "add-category") return "Open Add Category modal";
+    if (actionType === "quick-transaction") return "Open Add Transaction form";
     return "Action";
   }, [actionType]);
 
   const triggerAction = () => {
-    if (actionType === "add-account") {
-      setIsAddAccountOpen(true);
+    if (actionType === "add-category") {
+      setIsAddCategoryOpen(true);
     } else {
       setIsQuickTransactionOpen(true);
     }
   };
 
   const openAddAccount = () => setIsAddAccountOpen(true);
+  const openAddCategory = () => setIsAddCategoryOpen(true);
 
   const openQuickTransaction = (account?: AccountContextData) => {
     if (account) setActiveAccount(account);
@@ -73,6 +78,7 @@ export function FABProvider({ children }: { children: React.ReactNode }) {
       value={{
         triggerAction,
         openAddAccount,
+        openAddCategory,
         openQuickTransaction,
         activeAccount,
         setActiveAccount,
@@ -89,11 +95,19 @@ export function FABProvider({ children }: { children: React.ReactNode }) {
         onClose={() => setIsAddAccountOpen(false)}
       />
 
-      <QuickTransactionModal
-        isOpen={isQuickTransactionOpen}
-        onClose={() => setIsQuickTransactionOpen(false)}
-        selectedAccount={activeAccount}
+      <AddCategoryModal
+        isOpen={isAddCategoryOpen}
+        onClose={() => setIsAddCategoryOpen(false)}
       />
+
+      {isQuickTransactionOpen && (
+        <QuickTransactionModal
+          isOpen
+          onClose={() => setIsQuickTransactionOpen(false)}
+          selectedAccount={isAccountDetailsPage ? activeAccount : null}
+          lockAccount={isAccountDetailsPage}
+        />
+      )}
     </FABContext.Provider>
   );
 }

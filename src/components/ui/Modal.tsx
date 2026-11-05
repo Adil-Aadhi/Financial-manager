@@ -61,16 +61,18 @@ export function Modal({
     lg: "max-w-2xl",
   };
 
+  // Mobile: bottom sheet that slides up and respects the home indicator.
+  // sm+: centred floating dialog.
   const modalContent = (
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="modal-title"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
+      className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-6"
     >
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-canvas/70 backdrop-blur-md transition-opacity duration-200"
+        className="fixed inset-0 bg-canvas/60 backdrop-blur-md transition-opacity duration-200 animate-fade"
         onClick={onClose}
         aria-hidden="true"
       />
@@ -79,22 +81,26 @@ export function Modal({
       <div
         ref={panelRef}
         className={cn(
-          "glass-strong glass-edge relative z-10 w-full animate-rise rounded-3xl p-6 sm:p-8 text-fg shadow-glass",
+          "glass-strong glass-edge relative z-10 max-h-[92dvh] w-full animate-sheet overflow-y-auto overscroll-contain rounded-t-[28px] px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 text-fg shadow-glass",
+          "sm:max-h-[calc(100dvh-3rem)] sm:animate-rise sm:rounded-3xl sm:p-7",
           sizeClasses[size],
           className
         )}
       >
+        {/* Grabber (mobile only) */}
+        <div className="mx-auto mb-2 h-1 w-9 rounded-full bg-line-strong sm:hidden" aria-hidden="true" />
+
         {/* Header */}
-        <div className="flex items-start justify-between gap-4 pb-4">
-          <div className="min-w-0 pr-4">
+        <div className="flex items-center justify-between gap-3 pb-3 sm:items-start sm:pb-4">
+          <div className="min-w-0">
             <h2
               id="modal-title"
-              className="text-lg font-semibold tracking-tight text-fg sm:text-xl"
+              className="truncate text-base font-semibold tracking-tight text-fg sm:text-xl"
             >
               {title}
             </h2>
             {description && (
-              <p className="mt-1 text-xs text-fg-muted sm:text-sm">
+              <p className="mt-0.5 text-xs text-fg-muted sm:text-sm">
                 {description}
               </p>
             )}
@@ -103,15 +109,15 @@ export function Modal({
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close modal"
-            className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-xl border border-line bg-glass-hover text-fg-muted transition-colors hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            aria-label="Close"
+            className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full border border-line bg-glass-hover text-fg-muted transition-colors hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
         {/* Body */}
-        <div className="mt-2">{children}</div>
+        <div>{children}</div>
       </div>
     </div>
   );

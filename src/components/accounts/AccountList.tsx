@@ -2,7 +2,8 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { ArrowUpRight, Landmark, Pencil, Trash2 } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, ChevronRight, Landmark, Pencil, Trash2 } from "lucide-react";
+import { cn } from "@/lib/cn";
 import { formatMoney } from "@/lib/format";
 import type { SupportedCurrency } from "@/lib/supabase/profile";
 import { Button } from "@/components/ui/Button";
@@ -37,7 +38,7 @@ export function AccountList({
 
   return (
     <>
-      <div className="grid gap-3 p-1 lg:grid-cols-2">
+      <div className="grid gap-3 lg:grid-cols-2">
         {accounts.map((acc) => {
           const currency =
             (acc.currency as SupportedCurrency) || fallbackCurrency;
@@ -46,48 +47,34 @@ export function AccountList({
           const totalExpense = Number(acc.total_expense) || 0;
           const balance = openingBalance + totalIncome - totalExpense;
 
-          const metrics = [
-            {
-              label: "Opening amount",
-              amount: openingBalance,
-              className: "text-fg",
-            },
-            {
-              label: "Balance",
-              amount: balance,
-              className: "text-fg",
-            },
-            {
-              label: "Total income",
-              amount: totalIncome,
-              className: "text-positive",
-            },
-            {
-              label: "Total expense",
-              amount: totalExpense,
-              className: "text-danger",
-            },
-          ];
-
           return (
             <article
               key={acc.id}
-              className="rounded-2xl border border-line bg-glass-hover p-4 transition-colors hover:border-accent/40"
+              className="relative overflow-hidden rounded-2xl border border-line bg-glass-hover p-4 transition-colors hover:border-accent/40"
             >
-              <div className="flex items-center justify-between gap-3">
+              <div className="pointer-events-none absolute -right-12 -top-14 h-36 w-36 rounded-full bg-[radial-gradient(circle,var(--aurora-1),transparent_70%)]" />
+
+              <div className="relative flex items-center justify-between gap-3">
                 <Link
                   href={`/accounts/${acc.id}`}
-                  className="flex min-w-0 items-center gap-2.5 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+                  className="flex min-w-0 items-center gap-3 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
                 >
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
-                    <Landmark className="h-4 w-4" />
+                  <span className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-brand text-accent-fg shadow-glow">
+                    <span className="absolute inset-0 bg-gradient-to-b from-white/30 to-transparent" />
+                    <Landmark className="relative h-[18px] w-[18px]" />
                   </span>
-                  <p className="truncate text-sm font-semibold text-fg">
-                    {acc.name}
-                  </p>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-fg">{acc.name}</p>
+                    <p className="mt-0.5 truncate text-[11px] text-fg-subtle">
+                      Opening{" "}
+                      <span className="font-money font-semibold">
+                        {formatMoney(openingBalance, currency)}
+                      </span>
+                    </p>
+                  </div>
                 </Link>
 
-                <div className="flex shrink-0 items-center gap-1">
+                <div className="flex shrink-0 items-center gap-0.5">
                   {actionsEnabled && (
                     <>
                       <Button
@@ -117,25 +104,31 @@ export function AccountList({
                     aria-label={`Open ${acc.name}`}
                     className="flex h-8 w-8 items-center justify-center rounded-lg text-fg-subtle transition-colors hover:bg-glass-hover hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
                   >
-                    <ArrowUpRight className="h-4 w-4" />
+                    <ChevronRight className="h-4 w-4" />
                   </Link>
                 </div>
               </div>
 
-              <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-line pt-4 sm:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4">
-                {metrics.map((metric) => (
-                  <div key={metric.label} className="min-w-0">
-                    <dt className="text-[11px] font-medium text-fg-subtle">
-                      {metric.label}
-                    </dt>
-                    <dd
-                      className={`mt-1 truncate font-mono text-xs font-semibold ${metric.className}`}
-                      title={formatMoney(metric.amount, currency)}
-                    >
-                      {formatMoney(metric.amount, currency)}
-                    </dd>
-                  </div>
-                ))}
+              <Link
+                href={`/accounts/${acc.id}`}
+                tabIndex={-1}
+                className="relative mt-4 block"
+              >
+                <p className="text-[11px] font-medium text-fg-subtle">Balance</p>
+                <p
+                  className={cn(
+                    "mt-0.5 truncate font-money text-[26px] font-bold leading-tight tracking-tight",
+                    balance > 0 ? "text-positive" : balance < 0 ? "text-danger" : "text-fg"
+                  )}
+                  title={formatMoney(balance, currency)}
+                >
+                  {formatMoney(balance, currency)}
+                </p>
+              </Link>
+
+              <dl className="relative mt-3 grid grid-cols-2 gap-2">
+                <FlowTile label="Income" value={formatMoney(totalIncome, currency)} tone="positive" />
+                <FlowTile label="Expenses" value={formatMoney(totalExpense, currency)} tone="negative" />
               </dl>
             </article>
           );
@@ -160,5 +153,33 @@ export function AccountList({
         />
       )}
     </>
+  );
+}
+
+function FlowTile({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: "positive" | "negative";
+}) {
+  const positive = tone === "positive";
+  return (
+    <div className="min-w-0 rounded-xl border border-line bg-glass-input px-3 py-2.5">
+      <dt
+        className={cn(
+          "flex items-center gap-1 text-[11px] font-medium",
+          positive ? "text-positive" : "text-danger"
+        )}
+      >
+        {positive ? <ArrowDownLeft className="h-3.5 w-3.5" /> : <ArrowUpRight className="h-3.5 w-3.5" />}
+        {label}
+      </dt>
+      <dd className="mt-0.5 truncate font-money text-sm font-bold text-fg" title={value}>
+        {value}
+      </dd>
+    </div>
   );
 }

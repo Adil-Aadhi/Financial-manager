@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useTransition } from "react";
+import React, { useEffect, useState, useTransition } from "react";
 import { Calendar, Clock3, RotateCcw, Trash2 } from "lucide-react";
 import { restoreAccountAction } from "@/app/actions/accounts";
 import { Alert } from "@/components/ui/Alert";
@@ -28,7 +28,12 @@ export function AccountTrashList({
   const [error, setError] = useState<string | null>(null);
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
-  const [now] = useState(() => Date.now());
+  const [now, setNow] = useState<number | null>(null);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setNow(Date.now()), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const restoreAccount = (accountId: string) => {
     setError(null);
@@ -73,12 +78,12 @@ export function AccountTrashList({
         const restoreBy = new Date(
           deletedAt.getTime() + 10 * 24 * 60 * 60 * 1000
         );
-        const msRemaining = restoreBy.getTime() - now;
-        const daysRemaining = Math.max(
-          0,
-          Math.ceil(msRemaining / (24 * 60 * 60 * 1000))
-        );
-        const isExpired = msRemaining <= 0;
+        const msRemaining = now === null ? null : restoreBy.getTime() - now;
+        const daysRemaining =
+          msRemaining === null
+            ? null
+            : Math.max(0, Math.ceil(msRemaining / (24 * 60 * 60 * 1000)));
+        const isExpired = msRemaining !== null && msRemaining <= 0;
 
         const formattedDeletedDate = deletedAt.toLocaleDateString("en-IN", {
           day: "numeric",
@@ -94,9 +99,12 @@ export function AccountTrashList({
           timeZone: "Asia/Kolkata",
         });
 
-        const retentionBadgeText = isExpired
-          ? "Retention expired"
-          : `${daysRemaining} day${daysRemaining === 1 ? "" : "s"} remaining`;
+        const retentionBadgeText =
+          daysRemaining === null
+            ? "Checking retention…"
+            : isExpired
+              ? "Retention expired"
+              : `${daysRemaining} day${daysRemaining === 1 ? "" : "s"} remaining`;
 
         return (
           <div
@@ -124,7 +132,7 @@ export function AccountTrashList({
                   </span>
                 </div>
 
-                <p className="mt-1 font-mono text-sm text-fg-muted">
+                <p className="mt-1 font-money text-sm text-fg-muted">
                   <span className="font-sans text-xs text-fg-subtle">
                     Opening amount:{" "}
                   </span>
@@ -149,7 +157,7 @@ export function AccountTrashList({
               size="sm"
               leftIcon={<RotateCcw className="h-3.5 w-3.5" />}
               isLoading={isPending && restoringId === account.id}
-              disabled={isPending || isExpired}
+              disabled={isPending || now === null || isExpired}
               onClick={() => restoreAccount(account.id)}
               className="w-full shrink-0 sm:w-auto"
             >
