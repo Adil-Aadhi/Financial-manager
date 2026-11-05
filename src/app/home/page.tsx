@@ -43,10 +43,24 @@ export default async function HomePage() {
   const saved = summary.monthIncome - summary.monthExpenses;
 
   const supabase = await createClient();
-  const { data: accounts } = await supabase
+  const accountsResult = await supabase
     .from("accounts")
     .select("id, name, opening_balance, currency")
+    .eq("user_id", user.id)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false });
+
+  let accounts = accountsResult.data;
+
+  if (accountsResult.error?.code === "42703") {
+    const legacyAccountsResult = await supabase
+      .from("accounts")
+      .select("id, name, opening_balance, currency")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false });
+
+    accounts = legacyAccountsResult.data;
+  }
 
   const totalAccountCount = accounts?.length ?? 0;
   const calculatedTotalBalance =

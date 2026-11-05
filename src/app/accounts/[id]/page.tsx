@@ -1,5 +1,5 @@
 import { Metadata } from "next";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Landmark, ReceiptText } from "lucide-react";
 import { getAuthenticatedUserProfile } from "@/lib/supabase/profile";
 import { createClient } from "@/lib/supabase/server";
@@ -33,22 +33,30 @@ export default async function AccountDetailsPage({ params }: AccountPageProps) {
 
   // Retrieve account details from Supabase accounts table
   const supabase = await createClient();
-  const { data: accountData } = await supabase
+  const accountResult = await supabase
     .from("accounts")
     .select("id, name, opening_balance, currency, created_at")
     .eq("id", id)
+    .eq("user_id", user.id)
+    .is("deleted_at", null)
     .maybeSingle();
 
-  // Gracefully fallback if testing with a mock ID
-  const account = accountData || {
-    id,
-    name:
-      id === "main" || id === "checking-1"
-        ? "Main Checking"
-        : `Account ${id}`,
-    opening_balance: 0,
-    currency: profile.default_currency,
-  };
+  let accountData = accountResult.data;
+
+  if (accountResult.error?.code === "42703") {
+    const legacyAccountResult = await supabase
+      .from("accounts")
+      .select("id, name, opening_balance, currency, created_at")
+      .eq("id", id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    accountData = legacyAccountResult.data;
+  }
+
+  if (!accountData) notFound();
+
+  const account = accountData;
 
   const userName = profile.full_name || user.email?.split("@")[0] || "User";
   const currency = account.currency || profile.default_currency;

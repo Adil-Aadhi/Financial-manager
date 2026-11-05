@@ -4,7 +4,7 @@ import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
-import { NAV_ITEMS, isActivePath } from "./nav-items";
+import { DESKTOP_NAV_ITEMS, isActivePath } from "./nav-items";
 
 /** Desktop navbar links (lg+). Mobile uses BottomNav. */
 export function TopNav() {
@@ -12,7 +12,7 @@ export function TopNav() {
 
   return (
     <nav aria-label="Main" className="hidden items-center gap-1 rounded-xl border border-line bg-glass-hover p-1 lg:flex">
-      {NAV_ITEMS.map(({ label, href, icon: Icon }) => {
+      {DESKTOP_NAV_ITEMS.map(({ label, href, icon: Icon }) => {
         const active = isActivePath(pathname, href);
         return (
           <Link
