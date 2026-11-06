@@ -1,5 +1,11 @@
 import "client-only";
 
+import {
+  ACCOUNT_GROUP_ERROR,
+  DEFAULT_NEW_ACCOUNT_GROUP,
+  isAccountGroup,
+  type AccountGroup,
+} from "@/lib/accounts";
 import { validateBudgetAmount } from "@/lib/budget";
 import { isCategoryType } from "@/lib/categories";
 import {
@@ -372,11 +378,16 @@ export async function loadLocalTransactionOptions(ownerId: string): Promise<Tran
 
 /* ---------------------------------------------------------------- accounts */
 
-export function createAccountLocally(ownerId: string, input: { name: string; startingAmount?: number }) {
+export function createAccountLocally(
+  ownerId: string,
+  input: { name: string; startingAmount?: number; accountGroup?: AccountGroup }
+) {
   return inLocalTransaction(async () => {
     await requireLocalSnapshot(ownerId);
     const name = input.name?.trim();
     if (!name) throw new LocalMutationError("Account Name is required.");
+    const accountGroup = input.accountGroup ?? DEFAULT_NEW_ACCOUNT_GROUP;
+    if (!isAccountGroup(accountGroup)) throw new LocalMutationError(ACCOUNT_GROUP_ERROR);
     const amount =
       typeof input.startingAmount === "number" && !Number.isNaN(input.startingAmount)
         ? input.startingAmount
@@ -393,6 +404,7 @@ export function createAccountLocally(ownerId: string, input: { name: string; sta
       // The server fills its own default currency when this syncs; until then the app shows
       // the profile's default currency, exactly as it does for any account without one.
       currency: null,
+      account_group: accountGroup,
       deleted_at: null,
       created_at: now,
       updated_at: now,
@@ -403,13 +415,25 @@ export function createAccountLocally(ownerId: string, input: { name: string; sta
       "account",
       row.id,
       "CREATE",
-      { id: row.id, user_id: ownerId, name, account_type: "other", opening_balance: amount, created_at: now, updated_at: now },
+      {
+        id: row.id,
+        user_id: ownerId,
+        name,
+        account_type: "other",
+        opening_balance: amount,
+        account_group: accountGroup,
+        created_at: now,
+        updated_at: now,
+      },
       null
     );
   });
 }
 
-export function updateAccountLocally(ownerId: string, input: { accountId: string; name: string; openingAmount: number }) {
+export function updateAccountLocally(
+  ownerId: string,
+  input: { accountId: string; name: string; openingAmount: number; accountGroup?: AccountGroup }
+) {
   return inLocalTransaction(async () => {
     await requireLocalSnapshot(ownerId);
     const name = input.name.trim();
@@ -418,8 +442,18 @@ export function updateAccountLocally(ownerId: string, input: { accountId: string
     if (fieldsError) throw new LocalMutationError(fieldsError);
     const existing = await offlineDb.accounts.get([ownerId, input.accountId]);
     if (!existing || existing.deleted_at) throw new LocalMutationError("Account not found.");
+    if (input.accountGroup !== undefined && !isAccountGroup(input.accountGroup)) {
+      throw new LocalMutationError(ACCOUNT_GROUP_ERROR);
+    }
 
-    const changes = { name, opening_balance: input.openingAmount, updated_at: new Date().toISOString() };
+    // The same object updates the local row and the outbox payload, so the queued change always
+    // carries exactly the group the user just chose (later saves merge over or follow it).
+    const changes = {
+      name,
+      opening_balance: input.openingAmount,
+      ...(input.accountGroup !== undefined ? { account_group: input.accountGroup } : {}),
+      updated_at: new Date().toISOString(),
+    };
     await offlineDb.accounts.update([ownerId, existing.id], changes);
     await enqueue(ownerId, "account", existing.id, "UPDATE", changes, existing.updated_at ?? null);
   });

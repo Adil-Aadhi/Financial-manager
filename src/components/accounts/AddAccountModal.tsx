@@ -6,6 +6,8 @@ import { Modal } from "@/components/ui/Modal";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
+import { AccountGroupSelector } from "@/components/accounts/AccountGroupSelector";
+import { DEFAULT_NEW_ACCOUNT_GROUP, type AccountGroup } from "@/lib/accounts";
 import { createAccountAction } from "@/app/actions/accounts";
 import { markOfflineDataStale } from "@/lib/offline/bootstrap";
 import { createAccountLocally, runMutation } from "@/lib/offline/mutations";
@@ -23,6 +25,7 @@ export function AddAccountModal({
 }: AddAccountModalProps) {
   const [name, setName] = useState("");
   const [startingAmount, setStartingAmount] = useState<string>("0");
+  const [accountGroup, setAccountGroup] = useState<AccountGroup>(DEFAULT_NEW_ACCOUNT_GROUP);
   const [error, setError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -31,6 +34,7 @@ export function AddAccountModal({
   const handleReset = () => {
     setName("");
     setStartingAmount("0");
+    setAccountGroup(DEFAULT_NEW_ACCOUNT_GROUP);
     setError(null);
     setNameError(null);
     setSuccessMessage(null);
@@ -55,7 +59,7 @@ export function AddAccountModal({
 
     startTransition(async () => {
       const parsedAmount = parseFloat(startingAmount) || 0;
-      const input = { name: trimmed, startingAmount: parsedAmount };
+      const input = { name: trimmed, startingAmount: parsedAmount, accountGroup };
       let created: { id: string; name: string } | undefined;
       const res = await runMutation({
         local: (ownerId) => createAccountLocally(ownerId, input),
@@ -138,6 +142,8 @@ export function AddAccountModal({
           leftIcon={<DollarSign className="h-4 w-4" />}
           disabled={isPending}
         />
+
+        <AccountGroupSelector value={accountGroup} onChange={setAccountGroup} disabled={isPending} />
 
         {/* Action Buttons */}
         <div className="flex items-center justify-end gap-3 pt-3 border-t border-line">

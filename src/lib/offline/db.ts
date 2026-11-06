@@ -1,6 +1,7 @@
 import "client-only";
 
 import Dexie, { type EntityTable, type Table } from "dexie";
+import type { AccountGroup } from "@/lib/accounts";
 import type { SyncReviewReason, TransactionDateIntent } from "@/lib/sync/types";
 
 export interface LocalProfile {
@@ -21,6 +22,11 @@ export interface LocalAccount {
   account_type: string;
   opening_balance: number | string | null;
   currency: string | null;
+  /**
+   * Not indexed, so no schema version change was needed. Rows cached before groups existed
+   * have no value; read it with normalizeAccountGroup (missing = General).
+   */
+  account_group?: AccountGroup;
   deleted_at: string | null;
   created_at: string;
   updated_at?: string | null;

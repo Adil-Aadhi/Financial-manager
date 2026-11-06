@@ -1,6 +1,7 @@
 import "client-only";
 
 import type { User } from "@supabase/supabase-js";
+import { normalizeAccountGroup } from "@/lib/accounts";
 import { offlineDb, type LocalSyncMeta, type LocalVerificationTotals } from "@/lib/offline/db";
 import { overlayOutbox } from "@/lib/offline/snapshotOverlay";
 import { createClient } from "@/lib/supabase/client";
@@ -52,10 +53,19 @@ interface AccountRow {
   account_type: string;
   opening_balance: number | string | null;
   currency: string | null;
+  account_group?: string | null;
   deleted_at?: string | null;
   created_at: string;
   updated_at?: string | null;
 }
+
+/**
+ * Every account column the device keeps. A column missing here is silently dropped from the
+ * local copy on each refresh (that is how a saved group change used to vanish), so the
+ * account-group regression tests check the downloaded rows against this list.
+ */
+export const ACCOUNT_SNAPSHOT_COLUMNS =
+  "id, user_id, name, account_type, opening_balance, currency, account_group, deleted_at, created_at, updated_at";
 
 interface CategoryRow {
   id: string;
@@ -133,9 +143,7 @@ async function downloadSnapshot(user: User) {
   const accountsPromise = fetchEveryPage<AccountRow>("Accounts", (from, to) =>
     supabase
       .from("accounts")
-      .select(
-        "id, user_id, name, account_type, opening_balance, currency, deleted_at, created_at, updated_at"
-      )
+      .select(ACCOUNT_SNAPSHOT_COLUMNS)
       .eq("user_id", user.id)
       .order("id")
       .range(from, to)
@@ -249,6 +257,7 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
           accounts: snapshot.accounts.map((account) => ({
             ownerId,
             ...account,
+            account_group: normalizeAccountGroup(account.account_group),
             deleted_at: account.deleted_at ?? null,
           })),
           categories: snapshot.categories.map((category) => ({ ownerId, ...category })),

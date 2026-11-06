@@ -5,7 +5,6 @@ import type { AccountListItem } from "@/components/accounts/AccountList";
 import { OfflineAccountList } from "@/components/accounts/OfflineAccountList";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
 import { Alert } from "@/components/ui/Alert";
-import { Card } from "@/components/ui/Card";
 import { getAuthenticatedUserProfile } from "@/lib/supabase/profile";
 import { createClient } from "@/lib/supabase/server";
 
@@ -23,12 +22,14 @@ export default async function TransactionsPage() {
   const supabase = await createClient();
   const activeAccountsResult = await supabase
     .from("accounts")
-    .select("id, name, opening_balance, currency")
+    .select("id, name, opening_balance, currency, account_group")
     .eq("user_id", user.id)
     .is("deleted_at", null)
     .order("created_at", { ascending: false });
 
-  let accounts = activeAccountsResult.data;
+  // The legacy query (pre-Trash schema) has no group column; those rows read as General.
+  let accounts: Omit<AccountListItem, "total_income" | "total_expense">[] | null =
+    activeAccountsResult.data;
   const accountTrashReady = activeAccountsResult.error?.code !== "42703";
 
   if (!accountTrashReady) {
@@ -94,14 +95,13 @@ export default async function TransactionsPage() {
           </Alert>
         )}
 
-        <Card title="Accounts" description="Balances are calculated from transaction history." bodyClassName="pt-2">
-          <OfflineAccountList
-            ownerId={user.id}
-            serverAccounts={accountItems}
-            fallbackCurrency={profile.default_currency}
-            actionsEnabled={accountTrashReady}
-          />
-        </Card>
+        {/* Renders the Primary/General tabs and the Accounts card. */}
+        <OfflineAccountList
+          ownerId={user.id}
+          serverAccounts={accountItems}
+          fallbackCurrency={profile.default_currency}
+          actionsEnabled={accountTrashReady}
+        />
       </div>
     </AppShell>
   );

@@ -1,3 +1,4 @@
+import { ACCOUNT_GROUP_ERROR, isAccountGroup, normalizeAccountGroup } from "@/lib/accounts";
 import { validateBudgetAmount } from "@/lib/budget";
 import type { createClient } from "@/lib/supabase/server";
 import { countCategoryUsage, validateTransactionInput } from "@/lib/server/validation";
@@ -296,7 +297,7 @@ async function applyTransaction(supabase: ServerClient, userId: string, op: Sync
 
 /* ------------------------------------------------------------------ accounts */
 
-const ACCOUNT_SELECT = "id, user_id, name, opening_balance, deleted_at, updated_at";
+const ACCOUNT_SELECT = "id, user_id, name, opening_balance, account_group, deleted_at, updated_at";
 
 async function applyAccount(supabase: ServerClient, userId: string, op: SyncOperation, editedAt: string, now: Date): Promise<SyncOpResult> {
   const { row, error } = await loadOwnRow(supabase, "accounts", ACCOUNT_SELECT, userId, op.entityId);
@@ -309,6 +310,9 @@ async function applyAccount(supabase: ServerClient, userId: string, op: SyncOper
     const invalid = accountFieldsError(name, opening);
     if (invalid) return rejected(op, invalid);
     const accountType = typeof op.payload.account_type === "string" && op.payload.account_type ? op.payload.account_type : "other";
+    // Changes queued before groups existed carry no group: the column default (general) applies.
+    const hasGroup = op.payload.account_group !== undefined;
+    if (hasGroup && !isAccountGroup(op.payload.account_group)) return rejected(op, ACCOUNT_GROUP_ERROR);
     const createdAt = resolveEditedAt(String(op.payload.created_at ?? editedAt), new Date(editedAt));
     // currency is omitted on purpose: the column default (INR) applies, like createAccountAction.
     const insert = await supabase.from("accounts").insert({
@@ -317,6 +321,7 @@ async function applyAccount(supabase: ServerClient, userId: string, op: SyncOper
       name,
       account_type: accountType,
       opening_balance: opening,
+      ...(hasGroup ? { account_group: op.payload.account_group } : {}),
       created_at: createdAt,
       updated_at: editedAt,
     });
@@ -334,14 +339,21 @@ async function applyAccount(supabase: ServerClient, userId: string, op: SyncOper
 
   // UPDATE: name/opening edits and/or Trash (deleted_at set) / restore (deleted_at null).
   if (!row) return rejected(op, "This account no longer exists. It may have been permanently deleted from Trash.");
-  const payload = pick(op.payload, ["name", "opening_balance", "deleted_at"]);
+  const payload = pick(op.payload, ["name", "opening_balance", "account_group", "deleted_at"]);
+  if (payload.account_group !== undefined && !isAccountGroup(payload.account_group)) {
+    return rejected(op, ACCOUNT_GROUP_ERROR);
+  }
   const wantsTrashChange = Object.prototype.hasOwnProperty.call(payload, "deleted_at");
   const wantTrashed = wantsTrashChange ? payload.deleted_at !== null : row.deleted_at !== null;
   const isTrashed = row.deleted_at !== null;
   const name = payload.name !== undefined ? String(payload.name).trim() : String(row.name);
   const opening = payload.opening_balance !== undefined ? Number(payload.opening_balance) : Number(row.opening_balance);
+  // The group is part of "already applied": a group-only change must never be skipped as a no-op.
+  const currentGroup = normalizeAccountGroup(row.account_group);
+  const group = payload.account_group !== undefined ? normalizeAccountGroup(payload.account_group) : currentGroup;
+  const groupChanged = group !== currentGroup;
 
-  if (name === String(row.name) && Number(opening) === Number(row.opening_balance) && wantTrashed === isTrashed) {
+  if (name === String(row.name) && Number(opening) === Number(row.opening_balance) && !groupChanged && wantTrashed === isTrashed) {
     return already(op, (row.updated_at as string) ?? null);
   }
   const lww = lastWriteWins(row.updated_at, op.baseUpdatedAt, editedAt);
@@ -349,7 +361,7 @@ async function applyAccount(supabase: ServerClient, userId: string, op: SyncOper
 
   const invalid = accountFieldsError(name, opening);
   if (invalid) return rejected(op, invalid);
-  const fieldsChanged = name !== String(row.name) || Number(opening) !== Number(row.opening_balance);
+  const fieldsChanged = name !== String(row.name) || Number(opening) !== Number(row.opening_balance) || groupChanged;
   if (fieldsChanged && isTrashed && !(wantsTrashChange && !wantTrashed)) {
     return rejected(op, "This account is in Trash on the server. Restore it before editing.");
   }
@@ -363,6 +375,7 @@ async function applyAccount(supabase: ServerClient, userId: string, op: SyncOper
   // The protect_account_deleted_at trigger sets the real Trash time and enforces the 10-day
   // restore window, so the device's own deleted_at value is never trusted.
   const changes: Row = { name, opening_balance: opening, updated_at: editedAt };
+  if (groupChanged) changes.account_group = group;
   if (wantTrashed !== isTrashed) changes.deleted_at = wantTrashed ? now.toISOString() : null;
   const update = await supabase
     .from("accounts")
