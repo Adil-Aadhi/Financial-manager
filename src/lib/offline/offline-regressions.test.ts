@@ -12,6 +12,8 @@ import { canCoalesce, selectRunnableEntries } from "@/lib/offline/queuePolicy";
 import { coordinateSignOut, shouldIsolateOwner } from "@/lib/offline/signOutCoordinator";
 import { overlayOutbox, type LocalSnapshotRows } from "@/lib/offline/snapshotOverlay";
 import type { SyncOperation } from "@/lib/sync/types";
+import { updateSession } from "@/lib/supabase/proxy";
+import { NextRequest } from "next/server";
 
 type Row = Record<string, unknown>;
 
@@ -271,20 +273,23 @@ describe("lost CREATE response regressions", () => {
 });
 
 describe("sign-out privacy ordering", () => {
-  it("clears owner/cache before a terminated server sign-out and preserves local data by default", async () => {
+  it("reproduces the protected POST redirect that broke the old Server Action flow", async () => {
+    const response = await updateSession(
+      new NextRequest("https://finance.example/settings", { method: "POST" })
+    );
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("https://finance.example/login");
+  });
+
+  it("clears owner/cache before a full login navigation and preserves local data by default", async () => {
     const calls: string[] = [];
-    await expect(
-      coordinateSignOut({
-        clearActiveOwner: () => calls.push("owner"),
-        clearPrivateCache: async () => void calls.push("cache"),
-        signOutBrowser: async () => void calls.push("browser"),
-        signOutServer: async () => {
-          calls.push("server");
-          throw new Error("terminated");
-        },
-      })
-    ).rejects.toThrow("terminated");
-    expect(calls).toEqual(["owner", "cache", "browser", "server"]);
+    await coordinateSignOut({
+      clearActiveOwner: () => calls.push("owner"),
+      clearPrivateCache: async () => void calls.push("cache"),
+      signOutBrowser: async () => void calls.push("browser"),
+      navigateToLogin: () => void calls.push("navigate"),
+    });
+    expect(calls).toEqual(["owner", "cache", "browser", "navigate"]);
   });
 
   it("continues cleanup for an expired browser session and removes data only when explicit", async () => {
@@ -297,9 +302,9 @@ describe("sign-out privacy ordering", () => {
         throw new Error("no session");
       },
       removeLocalData: async () => void calls.push("remove"),
-      signOutServer: async () => void calls.push("server"),
+      navigateToLogin: () => void calls.push("navigate"),
     });
-    expect(calls).toEqual(["owner", "cache", "expired", "remove", "server"]);
+    expect(calls).toEqual(["owner", "cache", "expired", "remove", "navigate"]);
     expect(shouldIsolateOwner("user-a", "user-b")).toBe(true);
     expect(shouldIsolateOwner("user-a", "user-a")).toBe(false);
   });

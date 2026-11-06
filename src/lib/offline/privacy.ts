@@ -3,24 +3,50 @@ import "client-only";
 import { offlineDb } from "@/lib/offline/db";
 
 const PRIVATE_CACHE_CLEAR_TIMEOUT_MS = 5_000;
+const PRIVATE_CACHE_NAME = "finance-tracker-private-v2";
+
+async function deletePrivateCacheDirectly() {
+  if ("caches" in window) await window.caches.delete(PRIVATE_CACHE_NAME);
+}
 
 /** Clears warmed authenticated routes and waits for the worker to finish when possible. */
 export async function clearPrivateRouteCache() {
   if (!("serviceWorker" in navigator)) return;
 
-  const registration = await navigator.serviceWorker.ready.catch(() => null);
-  const worker = navigator.serviceWorker.controller ?? registration?.active;
-  if (!worker) return;
+  let worker = navigator.serviceWorker.controller;
+  if (!worker) {
+    const registration = await Promise.race([
+      navigator.serviceWorker.ready.catch(() => null),
+      new Promise<null>((resolve) =>
+        window.setTimeout(() => resolve(null), PRIVATE_CACHE_CLEAR_TIMEOUT_MS)
+      ),
+    ]);
+    worker = registration?.active ?? null;
+  }
+  if (!worker) {
+    await deletePrivateCacheDirectly();
+    return;
+  }
 
-  await new Promise<void>((resolve) => {
-    const channel = new MessageChannel();
-    const timeout = window.setTimeout(resolve, PRIVATE_CACHE_CLEAR_TIMEOUT_MS);
-    channel.port1.onmessage = () => {
-      window.clearTimeout(timeout);
-      resolve();
-    };
-    worker.postMessage({ type: "CLEAR_PRIVATE_ROUTES" }, [channel.port2]);
-  });
+  try {
+    const acknowledged = await new Promise<boolean>((resolve) => {
+      const channel = new MessageChannel();
+      const timeout = window.setTimeout(
+        () => resolve(false),
+        PRIVATE_CACHE_CLEAR_TIMEOUT_MS
+      );
+      channel.port1.onmessage = () => {
+        window.clearTimeout(timeout);
+        resolve(true);
+      };
+      worker.postMessage({ type: "CLEAR_PRIVATE_ROUTES" }, [channel.port2]);
+    });
+    if (!acknowledged) await deletePrivateCacheDirectly();
+  } catch {
+    // A stale controller can reject postMessage during a worker update. Delete the named cache
+    // directly so privacy cleanup still completes and sign-out navigation is not interrupted.
+    await deletePrivateCacheDirectly();
+  }
 }
 
 /** Removes exactly one owner's local copy. Only call after an explicit destructive choice. */

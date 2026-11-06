@@ -3,7 +3,7 @@ export interface SignOutSteps {
   clearPrivateCache: () => Promise<void>;
   signOutBrowser: () => Promise<unknown>;
   removeLocalData?: () => Promise<void>;
-  signOutServer: () => Promise<unknown>;
+  navigateToLogin: () => void;
 }
 
 /** Privacy-sensitive ordering shared by the UI and regression tests. */
@@ -13,11 +13,13 @@ export async function coordinateSignOut(steps: SignOutSteps) {
   try {
     await steps.signOutBrowser();
   } catch {
-    // Cache/owner cleanup must still be followed by the server logout for an expired or already
-    // removed browser session.
+    // With local scope, Supabase removes the browser session before its best-effort server
+    // revocation request. Navigation must still finish if that request reports an error.
   }
   if (steps.removeLocalData) await steps.removeLocalData();
-  await steps.signOutServer();
+  // Use a full-document GET after the cookie is gone. Calling a Server Action here would POST
+  // to the protected current URL, where Proxy redirects before the action can execute.
+  steps.navigateToLogin();
 }
 
 export function shouldIsolateOwner(previousOwnerId: string | null, nextOwnerId: string) {

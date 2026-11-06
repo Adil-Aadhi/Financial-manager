@@ -4,7 +4,6 @@ import React, { useState, useTransition } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { AlertTriangle, Loader2, LogOut } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { logoutAction } from "@/app/actions/auth";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
@@ -44,7 +43,7 @@ export function SignOutButton({ className, variant = "row" }: SignOutButtonProps
           removeFromDevice && signingOutOwnerId
             ? () => removeLocalOwnerData(signingOutOwnerId)
             : undefined,
-        signOutServer: logoutAction,
+        navigateToLogin: () => window.location.replace("/login"),
       });
     });
   };
