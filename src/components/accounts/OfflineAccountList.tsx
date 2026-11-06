@@ -1,10 +1,18 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Landmark } from "lucide-react";
 import { AccountList, type AccountListItem } from "@/components/accounts/AccountList";
+import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
+import {
+  ACCOUNT_GROUP_LABELS,
+  ACCOUNT_GROUPS,
+  normalizeAccountGroup,
+  type AccountGroup,
+} from "@/lib/accounts";
+import { cn } from "@/lib/cn";
 import { offlineDb } from "@/lib/offline/db";
 import { useOfflineRefresh } from "@/lib/offline/useOfflineRefresh";
 import { useLocalContentMark } from "@/lib/perf";
@@ -21,10 +29,12 @@ export function OfflineAccountList({
   fallbackCurrency: SupportedCurrency;
   actionsEnabled: boolean;
 }) {
+  const [activeGroup, setActiveGroup] = useState<AccountGroup>("primary");
+
   const serverVersion = serverAccounts
     .map(
       (account) =>
-        `${account.id}:${account.name}:${account.opening_balance}:${account.total_income}:${account.total_expense}`
+        `${account.id}:${account.name}:${account.opening_balance}:${normalizeAccountGroup(account.account_group)}:${account.total_income}:${account.total_expense}`
     )
     .join("|");
 
@@ -55,6 +65,7 @@ export function OfflineAccountList({
         name: account.name,
         opening_balance: account.opening_balance,
         currency: account.currency,
+        account_group: normalizeAccountGroup(account.account_group),
         total_income: totalsByAccount.get(account.id)?.income ?? 0,
         total_expense: totalsByAccount.get(account.id)?.expense ?? 0,
       }));
@@ -62,22 +73,78 @@ export function OfflineAccountList({
   useLocalContentMark(localAccounts != null); // TEMPORARY perf (Step 3 Phase 0)
 
   const accounts = localAccounts ?? serverAccounts;
-  if (accounts.length === 0) {
-    return (
-      <EmptyState
-        icon={<Landmark className="h-5 w-5" />}
-        title="No accounts yet"
-        description="Add an account before recording transactions."
-      />
-    );
-  }
+  // Every account has exactly one group (missing = General), so each appears in exactly one tab.
+  const counts: Record<AccountGroup, number> = { primary: 0, general: 0 };
+  for (const account of accounts) counts[normalizeAccountGroup(account.account_group)] += 1;
+  const visibleAccounts = accounts.filter(
+    (account) => normalizeAccountGroup(account.account_group) === activeGroup
+  );
 
   return (
-    <AccountList
-      accounts={accounts}
-      fallbackCurrency={fallbackCurrency}
-      actionsEnabled={actionsEnabled}
-    />
+    <>
+      {/* Sits directly under the page header's Add Account button (right-aligned from sm up). */}
+      <div className="-mt-1 flex sm:-mt-3 sm:justify-end">
+      <div
+        role="tablist"
+        aria-label="Account group"
+        className="glass-track grid w-full grid-cols-2 gap-1 rounded-full p-1 sm:w-auto sm:min-w-64"
+      >
+        {ACCOUNT_GROUPS.map((group) => {
+          const active = activeGroup === group;
+          return (
+            <button
+              key={group}
+              type="button"
+              role="tab"
+              id={`account-group-tab-${group}`}
+              aria-selected={active}
+              aria-controls="account-group-panel"
+              onClick={() => setActiveGroup(group)}
+              className={cn(
+                "flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-full text-xs font-semibold transition-all duration-200",
+                active ? "glass text-fg" : "text-fg-subtle hover:text-fg"
+              )}
+            >
+              {ACCOUNT_GROUP_LABELS[group]}
+              <span
+                className={cn(
+                  "rounded-full px-1.5 py-px font-mono text-[10px]",
+                  active ? "bg-accent/12 text-accent" : "bg-glass-hover"
+                )}
+              >
+                {counts[group]}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      </div>
+
+      <Card title="Accounts" description="Balances are calculated from transaction history." bodyClassName="pt-2">
+        <div id="account-group-panel" role="tabpanel" aria-labelledby={`account-group-tab-${activeGroup}`}>
+          {visibleAccounts.length === 0 ? (
+            <EmptyState
+              icon={<Landmark className="h-5 w-5" />}
+              title={
+                accounts.length === 0 ? "No accounts yet" : `No ${ACCOUNT_GROUP_LABELS[activeGroup]} accounts`
+              }
+              description={
+                accounts.length === 0
+                  ? "Add an account before recording transactions."
+                  : `Edit an account and choose ${ACCOUNT_GROUP_LABELS[activeGroup]} to show it here.`
+              }
+            />
+          ) : (
+            <AccountList
+              accounts={visibleAccounts}
+              fallbackCurrency={fallbackCurrency}
+              actionsEnabled={actionsEnabled}
+              // Follow an account that was moved, so it stays in view after the edit.
+              onAccountSaved={setActiveGroup}
+            />
+          )}
+        </div>
+      </Card>
+    </>
   );
 }
-

@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { ArrowDownLeft, ArrowUpRight, ChevronRight, Landmark, Pencil, Trash2 } from "lucide-react";
+import type { AccountGroup } from "@/lib/accounts";
 import { cn } from "@/lib/cn";
 import { formatMoney } from "@/lib/format";
 import type { SupportedCurrency } from "@/lib/supabase/profile";
@@ -17,6 +18,7 @@ export interface AccountListItem {
   name: string;
   opening_balance: number | string | null;
   currency: string | null;
+  account_group?: AccountGroup | string | null;
   total_income?: number | string | null;
   total_expense?: number | string | null;
 }
@@ -26,10 +28,13 @@ export function AccountList({
   accounts,
   fallbackCurrency,
   actionsEnabled = true,
+  onAccountSaved,
 }: {
   accounts: AccountListItem[];
   fallbackCurrency: SupportedCurrency;
   actionsEnabled?: boolean;
+  /** Called after an account edit is saved, with the account's (possibly new) group. */
+  onAccountSaved?: (group: AccountGroup) => void;
 }) {
   const [editingAccount, setEditingAccount] =
     useState<AccountListItem | null>(null);
@@ -141,6 +146,7 @@ export function AccountList({
           account={editingAccount}
           isOpen
           onClose={() => setEditingAccount(null)}
+          onSaved={onAccountSaved}
         />
       )}
 

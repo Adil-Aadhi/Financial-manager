@@ -3,11 +3,18 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { ACCOUNT_RESTORE_WINDOW_MS, accountFieldsError } from "@/lib/validation/rules";
+import {
+  ACCOUNT_GROUP_ERROR,
+  DEFAULT_NEW_ACCOUNT_GROUP,
+  isAccountGroup,
+  type AccountGroup,
+} from "@/lib/accounts";
 
 export interface CreateAccountInput {
   name: string;
   startingAmount?: number;
   accountType?: string;
+  accountGroup?: AccountGroup;
 }
 
 export interface CreateAccountResult {
@@ -18,6 +25,7 @@ export interface CreateAccountResult {
     name: string;
     opening_balance?: number;
     account_type?: string;
+    account_group?: AccountGroup;
   };
 }
 
@@ -25,6 +33,8 @@ export interface UpdateAccountInput {
   accountId: string;
   name: string;
   openingAmount: number;
+  /** Omitted by callers that don't change the group; the stored group is then kept. */
+  accountGroup?: AccountGroup;
 }
 
 export interface AccountActionResult {
@@ -55,6 +65,7 @@ export async function createAccountAction({
   name,
   startingAmount = 0,
   accountType = "other",
+  accountGroup = DEFAULT_NEW_ACCOUNT_GROUP,
 }: CreateAccountInput): Promise<CreateAccountResult> {
   const supabase = await createClient();
   const {
@@ -70,6 +81,10 @@ export async function createAccountAction({
     return { success: false, error: "Account Name is required." };
   }
 
+  if (!isAccountGroup(accountGroup)) {
+    return { success: false, error: ACCOUNT_GROUP_ERROR };
+  }
+
   const parsedAmount =
     typeof startingAmount === "number" && !isNaN(startingAmount)
       ? startingAmount
@@ -82,8 +97,9 @@ export async function createAccountAction({
       name: trimmedName,
       account_type: accountType || "other",
       opening_balance: parsedAmount,
+      account_group: accountGroup,
     })
-    .select("id, name, opening_balance, account_type")
+    .select("id, name, opening_balance, account_type, account_group")
     .single();
 
   if (error) {
@@ -105,6 +121,7 @@ export async function updateAccountAction({
   accountId,
   name,
   openingAmount,
+  accountGroup,
 }: UpdateAccountInput): Promise<AccountActionResult> {
   const { supabase, user } = await getAccountActionContext();
 
@@ -120,12 +137,17 @@ export async function updateAccountAction({
   if (fieldsError) {
     return { success: false, error: fieldsError };
   }
+  if (accountGroup !== undefined && !isAccountGroup(accountGroup)) {
+    return { success: false, error: ACCOUNT_GROUP_ERROR };
+  }
 
   const { data, error } = await supabase
     .from("accounts")
     .update({
       name: trimmedName,
       opening_balance: openingAmount,
+      // Only the group column changes; id, balance and transactions are untouched.
+      ...(accountGroup !== undefined ? { account_group: accountGroup } : {}),
       updated_at: new Date().toISOString(),
     })
     .eq("id", accountId)

@@ -7,6 +7,8 @@ import {
   updateAccountAction,
 } from "@/app/actions/accounts";
 import type { AccountListItem } from "@/components/accounts/AccountList";
+import { AccountGroupSelector } from "@/components/accounts/AccountGroupSelector";
+import { normalizeAccountGroup, type AccountGroup } from "@/lib/accounts";
 import { markOfflineDataStale } from "@/lib/offline/bootstrap";
 import { runMutation, trashAccountLocally, updateAccountLocally } from "@/lib/offline/mutations";
 import { Alert } from "@/components/ui/Alert";
@@ -18,12 +20,18 @@ export function EditAccountModal({
   account,
   isOpen,
   onClose,
+  onSaved,
 }: {
   account: AccountListItem;
   isOpen: boolean;
   onClose: () => void;
+  /** Called after a successful save with the group the account now belongs to. */
+  onSaved?: (group: AccountGroup) => void;
 }) {
   const [name, setName] = useState(account.name);
+  const [accountGroup, setAccountGroup] = useState<AccountGroup>(
+    normalizeAccountGroup(account.account_group)
+  );
   const [openingAmount, setOpeningAmount] = useState(
     String(Number(account.opening_balance) || 0)
   );
@@ -49,7 +57,12 @@ export function EditAccountModal({
     }
 
     startTransition(async () => {
-      const input = { accountId: account.id, name: trimmedName, openingAmount: parsedAmount };
+      const input = {
+        accountId: account.id,
+        name: trimmedName,
+        openingAmount: parsedAmount,
+        accountGroup,
+      };
       const result = await runMutation({
         local: (ownerId) => updateAccountLocally(ownerId, input),
         remote: () => updateAccountAction(input),
@@ -61,6 +74,7 @@ export function EditAccountModal({
       }
 
       if (!result.queued) markOfflineDataStale();
+      onSaved?.(accountGroup);
       onClose();
     });
   };
@@ -70,7 +84,7 @@ export function EditAccountModal({
       isOpen={isOpen}
       onClose={onClose}
       title="Edit Account"
-      description="Update the account name or opening amount."
+      description="Update the account name, opening amount, or group."
       size="md"
     >
       <form onSubmit={handleSubmit} noValidate className="space-y-5">
@@ -106,6 +120,8 @@ export function EditAccountModal({
           disabled={isPending}
           required
         />
+
+        <AccountGroupSelector value={accountGroup} onChange={setAccountGroup} disabled={isPending} />
 
         <div className="flex items-center justify-end gap-3 border-t border-line pt-3">
           <Button
