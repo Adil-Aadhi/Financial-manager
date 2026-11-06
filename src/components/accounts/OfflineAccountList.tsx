@@ -18,6 +18,7 @@ import { offlineDb } from "@/lib/offline/db";
 import { useOfflineRefresh } from "@/lib/offline/useOfflineRefresh";
 import { useLocalContentMark } from "@/lib/perf";
 import type { SupportedCurrency } from "@/lib/supabase/profile";
+import { clearCardOrder } from "@/lib/transactionCardOrder";
 
 export function OfflineAccountList({
   ownerId,
@@ -31,6 +32,12 @@ export function OfflineAccountList({
   actionsEnabled: boolean;
 }) {
   const [activeGroup, setActiveGroup] = useState<AccountGroup>("primary");
+  const [hasCustomOrder, setHasCustomOrder] = useState(false);
+
+  const handleResetOrder = () => {
+    clearCardOrder(ownerId);
+    setHasCustomOrder(false);
+  };
 
   const serverVersion = serverAccounts
     .map(
@@ -122,7 +129,23 @@ export function OfflineAccountList({
       </div>
       </div>
 
-      <Card title="Accounts" description="Balances are calculated from transaction history." bodyClassName="pt-2">
+      <Card
+        title="Accounts"
+        description="Balances are calculated from transaction history."
+        bodyClassName="pt-2"
+        action={
+          hasCustomOrder ? (
+            <button
+              type="button"
+              onClick={handleResetOrder}
+              className="cursor-pointer rounded-lg px-2.5 py-1 text-xs font-semibold text-fg-subtle transition-colors hover:bg-glass-hover hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+              title="Reset card arrangement to default"
+            >
+              Reset to default
+            </button>
+          ) : null
+        }
+      >
         <div id="account-group-panel" role="tabpanel" aria-labelledby={`account-group-tab-${activeGroup}`}>
           {visibleAccounts.length === 0 ? (
             <EmptyState
@@ -139,10 +162,12 @@ export function OfflineAccountList({
           ) : (
             <AccountList
               accounts={visibleAccounts}
+              ownerId={ownerId}
               fallbackCurrency={fallbackCurrency}
               actionsEnabled={actionsEnabled}
               // Follow an account that was moved, so it stays in view after the edit.
               onAccountSaved={setActiveGroup}
+              onCustomOrderChange={setHasCustomOrder}
             />
           )}
         </div>
