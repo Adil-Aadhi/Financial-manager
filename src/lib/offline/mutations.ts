@@ -380,7 +380,12 @@ export async function loadLocalTransactionOptions(ownerId: string): Promise<Tran
 
 export function createAccountLocally(
   ownerId: string,
-  input: { name: string; startingAmount?: number; accountGroup?: AccountGroup }
+  input: {
+    name: string;
+    startingAmount?: number;
+    accountGroup?: AccountGroup;
+    includeInSummary?: boolean;
+  }
 ) {
   return inLocalTransaction(async () => {
     await requireLocalSnapshot(ownerId);
@@ -388,6 +393,10 @@ export function createAccountLocally(
     if (!name) throw new LocalMutationError("Account Name is required.");
     const accountGroup = input.accountGroup ?? DEFAULT_NEW_ACCOUNT_GROUP;
     if (!isAccountGroup(accountGroup)) throw new LocalMutationError(ACCOUNT_GROUP_ERROR);
+    const includeInSummary = input.includeInSummary ?? true;
+    if (typeof includeInSummary !== "boolean") {
+      throw new LocalMutationError("Choose whether to include this account in financial summaries.");
+    }
     const amount =
       typeof input.startingAmount === "number" && !Number.isNaN(input.startingAmount)
         ? input.startingAmount
@@ -405,6 +414,7 @@ export function createAccountLocally(
       // the profile's default currency, exactly as it does for any account without one.
       currency: null,
       account_group: accountGroup,
+      include_in_summary: includeInSummary,
       deleted_at: null,
       created_at: now,
       updated_at: now,
@@ -422,6 +432,7 @@ export function createAccountLocally(
         account_type: "other",
         opening_balance: amount,
         account_group: accountGroup,
+        include_in_summary: includeInSummary,
         created_at: now,
         updated_at: now,
       },
@@ -432,7 +443,13 @@ export function createAccountLocally(
 
 export function updateAccountLocally(
   ownerId: string,
-  input: { accountId: string; name: string; openingAmount: number; accountGroup?: AccountGroup }
+  input: {
+    accountId: string;
+    name: string;
+    openingAmount: number;
+    accountGroup?: AccountGroup;
+    includeInSummary?: boolean;
+  }
 ) {
   return inLocalTransaction(async () => {
     await requireLocalSnapshot(ownerId);
@@ -445,6 +462,9 @@ export function updateAccountLocally(
     if (input.accountGroup !== undefined && !isAccountGroup(input.accountGroup)) {
       throw new LocalMutationError(ACCOUNT_GROUP_ERROR);
     }
+    if (input.includeInSummary !== undefined && typeof input.includeInSummary !== "boolean") {
+      throw new LocalMutationError("Choose whether to include this account in financial summaries.");
+    }
 
     // The same object updates the local row and the outbox payload, so the queued change always
     // carries exactly the group the user just chose (later saves merge over or follow it).
@@ -452,6 +472,9 @@ export function updateAccountLocally(
       name,
       opening_balance: input.openingAmount,
       ...(input.accountGroup !== undefined ? { account_group: input.accountGroup } : {}),
+      ...(input.includeInSummary !== undefined
+        ? { include_in_summary: input.includeInSummary }
+        : {}),
       updated_at: new Date().toISOString(),
     };
     await offlineDb.accounts.update([ownerId, existing.id], changes);

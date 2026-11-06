@@ -12,6 +12,7 @@ import {
   normalizeAccountGroup,
   type AccountGroup,
 } from "@/lib/accounts";
+import { normalizeIncludeInSummary } from "@/lib/accountSummary";
 import { cn } from "@/lib/cn";
 import { offlineDb } from "@/lib/offline/db";
 import { useOfflineRefresh } from "@/lib/offline/useOfflineRefresh";
@@ -34,7 +35,7 @@ export function OfflineAccountList({
   const serverVersion = serverAccounts
     .map(
       (account) =>
-        `${account.id}:${account.name}:${account.opening_balance}:${normalizeAccountGroup(account.account_group)}:${account.total_income}:${account.total_expense}`
+        `${account.id}:${account.name}:${account.opening_balance}:${normalizeAccountGroup(account.account_group)}:${normalizeIncludeInSummary(account.include_in_summary)}:${account.total_income}:${account.total_expense}`
     )
     .join("|");
 
@@ -66,6 +67,7 @@ export function OfflineAccountList({
         opening_balance: account.opening_balance,
         currency: account.currency,
         account_group: normalizeAccountGroup(account.account_group),
+        include_in_summary: normalizeIncludeInSummary(account.include_in_summary),
         total_income: totalsByAccount.get(account.id)?.income ?? 0,
         total_expense: totalsByAccount.get(account.id)?.expense ?? 0,
       }));

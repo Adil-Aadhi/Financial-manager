@@ -30,7 +30,7 @@ export default async function HomePage() {
   const [accountsResult, transactionsResult, budget] = await Promise.all([
     supabase
       .from("accounts")
-      .select("id, name, opening_balance, currency, deleted_at, created_at")
+      .select("id, name, opening_balance, currency, include_in_summary, deleted_at, created_at")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false }),
     supabase
@@ -47,24 +47,43 @@ export default async function HomePage() {
     name: account.name,
     opening_balance: account.opening_balance,
     currency: account.currency,
+    include_in_summary: account.include_in_summary,
     deleted_at: account.deleted_at ?? null,
     created_at: account.created_at,
   }));
   if (accountsResult.error?.code === "42703") {
-    const legacy = await supabase
+    const preSummary = await supabase
       .from("accounts")
-      .select("id, name, opening_balance, currency, created_at")
+      .select("id, name, opening_balance, currency, deleted_at, created_at")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
-    accounts = (legacy.data ?? []).map((account) => ({
-      id: account.id,
-      name: account.name,
-      opening_balance: account.opening_balance,
-      currency: account.currency,
-      deleted_at: null,
-      created_at: account.created_at,
-    }));
-    if (legacy.error) console.error("Error fetching dashboard accounts:", legacy.error.message);
+    if (!preSummary.error) {
+      accounts = (preSummary.data ?? []).map((account) => ({
+        id: account.id,
+        name: account.name,
+        opening_balance: account.opening_balance,
+        currency: account.currency,
+        include_in_summary: true,
+        deleted_at: account.deleted_at ?? null,
+        created_at: account.created_at,
+      }));
+    } else {
+      const legacy = await supabase
+        .from("accounts")
+        .select("id, name, opening_balance, currency, created_at")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+      accounts = (legacy.data ?? []).map((account) => ({
+        id: account.id,
+        name: account.name,
+        opening_balance: account.opening_balance,
+        currency: account.currency,
+        include_in_summary: true,
+        deleted_at: null,
+        created_at: account.created_at,
+      }));
+      if (legacy.error) console.error("Error fetching dashboard accounts:", legacy.error.message);
+    }
   } else if (accountsResult.error) {
     console.error("Error fetching dashboard accounts:", accountsResult.error.message);
   }

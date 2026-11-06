@@ -6,6 +6,7 @@ import { Modal } from "@/components/ui/Modal";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Alert } from "@/components/ui/Alert";
+import { Checkbox } from "@/components/ui/Checkbox";
 import { AccountGroupSelector } from "@/components/accounts/AccountGroupSelector";
 import { DEFAULT_NEW_ACCOUNT_GROUP, type AccountGroup } from "@/lib/accounts";
 import { createAccountAction } from "@/app/actions/accounts";
@@ -26,6 +27,7 @@ export function AddAccountModal({
   const [name, setName] = useState("");
   const [startingAmount, setStartingAmount] = useState<string>("0");
   const [accountGroup, setAccountGroup] = useState<AccountGroup>(DEFAULT_NEW_ACCOUNT_GROUP);
+  const [includeInSummary, setIncludeInSummary] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -35,6 +37,7 @@ export function AddAccountModal({
     setName("");
     setStartingAmount("0");
     setAccountGroup(DEFAULT_NEW_ACCOUNT_GROUP);
+    setIncludeInSummary(true);
     setError(null);
     setNameError(null);
     setSuccessMessage(null);
@@ -59,7 +62,12 @@ export function AddAccountModal({
 
     startTransition(async () => {
       const parsedAmount = parseFloat(startingAmount) || 0;
-      const input = { name: trimmed, startingAmount: parsedAmount, accountGroup };
+      const input = {
+        name: trimmed,
+        startingAmount: parsedAmount,
+        accountGroup,
+        includeInSummary,
+      };
       let created: { id: string; name: string } | undefined;
       const res = await runMutation({
         local: (ownerId) => createAccountLocally(ownerId, input),
@@ -144,6 +152,15 @@ export function AddAccountModal({
         />
 
         <AccountGroupSelector value={accountGroup} onChange={setAccountGroup} disabled={isPending} />
+
+        <Checkbox
+          id="account-include-in-summary"
+          checked={includeInSummary}
+          onChange={(event) => setIncludeInSummary(event.target.checked)}
+          label="Include in Financial Summaries"
+          description="Include this account in dashboard totals, consolidated reports and category breakdowns."
+          disabled={isPending}
+        />
 
         {/* Action Buttons */}
         <div className="flex items-center justify-end gap-3 pt-3 border-t border-line">

@@ -1,4 +1,9 @@
-import { ACCOUNT_GROUP_ERROR, isAccountGroup, normalizeAccountGroup } from "@/lib/accounts";
+import {
+  ACCOUNT_GROUP_ERROR,
+  isAccountGroup,
+  normalizeAccountGroup,
+} from "@/lib/accounts";
+import { normalizeIncludeInSummary } from "@/lib/accountSummary";
 import { validateBudgetAmount } from "@/lib/budget";
 import type { createClient } from "@/lib/supabase/server";
 import { countCategoryUsage, validateTransactionInput } from "@/lib/server/validation";
@@ -297,7 +302,8 @@ async function applyTransaction(supabase: ServerClient, userId: string, op: Sync
 
 /* ------------------------------------------------------------------ accounts */
 
-const ACCOUNT_SELECT = "id, user_id, name, opening_balance, account_group, deleted_at, updated_at";
+const ACCOUNT_SELECT =
+  "id, user_id, name, opening_balance, account_group, include_in_summary, deleted_at, updated_at";
 
 async function applyAccount(supabase: ServerClient, userId: string, op: SyncOperation, editedAt: string, now: Date): Promise<SyncOpResult> {
   const { row, error } = await loadOwnRow(supabase, "accounts", ACCOUNT_SELECT, userId, op.entityId);
@@ -313,6 +319,10 @@ async function applyAccount(supabase: ServerClient, userId: string, op: SyncOper
     // Changes queued before groups existed carry no group: the column default (general) applies.
     const hasGroup = op.payload.account_group !== undefined;
     if (hasGroup && !isAccountGroup(op.payload.account_group)) return rejected(op, ACCOUNT_GROUP_ERROR);
+    const hasSummaryInclusion = op.payload.include_in_summary !== undefined;
+    if (hasSummaryInclusion && typeof op.payload.include_in_summary !== "boolean") {
+      return rejected(op, "Choose whether to include this account in financial summaries.");
+    }
     const createdAt = resolveEditedAt(String(op.payload.created_at ?? editedAt), new Date(editedAt));
     // currency is omitted on purpose: the column default (INR) applies, like createAccountAction.
     const insert = await supabase.from("accounts").insert({
@@ -322,6 +332,9 @@ async function applyAccount(supabase: ServerClient, userId: string, op: SyncOper
       account_type: accountType,
       opening_balance: opening,
       ...(hasGroup ? { account_group: op.payload.account_group } : {}),
+      ...(hasSummaryInclusion
+        ? { include_in_summary: op.payload.include_in_summary }
+        : {}),
       created_at: createdAt,
       updated_at: editedAt,
     });
@@ -339,9 +352,18 @@ async function applyAccount(supabase: ServerClient, userId: string, op: SyncOper
 
   // UPDATE: name/opening edits and/or Trash (deleted_at set) / restore (deleted_at null).
   if (!row) return rejected(op, "This account no longer exists. It may have been permanently deleted from Trash.");
-  const payload = pick(op.payload, ["name", "opening_balance", "account_group", "deleted_at"]);
+  const payload = pick(op.payload, [
+    "name",
+    "opening_balance",
+    "account_group",
+    "include_in_summary",
+    "deleted_at",
+  ]);
   if (payload.account_group !== undefined && !isAccountGroup(payload.account_group)) {
     return rejected(op, ACCOUNT_GROUP_ERROR);
+  }
+  if (payload.include_in_summary !== undefined && typeof payload.include_in_summary !== "boolean") {
+    return rejected(op, "Choose whether to include this account in financial summaries.");
   }
   const wantsTrashChange = Object.prototype.hasOwnProperty.call(payload, "deleted_at");
   const wantTrashed = wantsTrashChange ? payload.deleted_at !== null : row.deleted_at !== null;
@@ -352,8 +374,20 @@ async function applyAccount(supabase: ServerClient, userId: string, op: SyncOper
   const currentGroup = normalizeAccountGroup(row.account_group);
   const group = payload.account_group !== undefined ? normalizeAccountGroup(payload.account_group) : currentGroup;
   const groupChanged = group !== currentGroup;
+  const currentSummaryInclusion = normalizeIncludeInSummary(row.include_in_summary);
+  const includeInSummary =
+    payload.include_in_summary !== undefined
+      ? normalizeIncludeInSummary(payload.include_in_summary)
+      : currentSummaryInclusion;
+  const summaryInclusionChanged = includeInSummary !== currentSummaryInclusion;
 
-  if (name === String(row.name) && Number(opening) === Number(row.opening_balance) && !groupChanged && wantTrashed === isTrashed) {
+  if (
+    name === String(row.name) &&
+    Number(opening) === Number(row.opening_balance) &&
+    !groupChanged &&
+    !summaryInclusionChanged &&
+    wantTrashed === isTrashed
+  ) {
     return already(op, (row.updated_at as string) ?? null);
   }
   const lww = lastWriteWins(row.updated_at, op.baseUpdatedAt, editedAt);
@@ -361,7 +395,11 @@ async function applyAccount(supabase: ServerClient, userId: string, op: SyncOper
 
   const invalid = accountFieldsError(name, opening);
   if (invalid) return rejected(op, invalid);
-  const fieldsChanged = name !== String(row.name) || Number(opening) !== Number(row.opening_balance) || groupChanged;
+  const fieldsChanged =
+    name !== String(row.name) ||
+    Number(opening) !== Number(row.opening_balance) ||
+    groupChanged ||
+    summaryInclusionChanged;
   if (fieldsChanged && isTrashed && !(wantsTrashChange && !wantTrashed)) {
     return rejected(op, "This account is in Trash on the server. Restore it before editing.");
   }
@@ -376,6 +414,7 @@ async function applyAccount(supabase: ServerClient, userId: string, op: SyncOper
   // restore window, so the device's own deleted_at value is never trusted.
   const changes: Row = { name, opening_balance: opening, updated_at: editedAt };
   if (groupChanged) changes.account_group = group;
+  if (summaryInclusionChanged) changes.include_in_summary = includeInSummary;
   if (wantTrashed !== isTrashed) changes.deleted_at = wantTrashed ? now.toISOString() : null;
   const update = await supabase
     .from("accounts")

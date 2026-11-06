@@ -15,6 +15,7 @@ export interface CreateAccountInput {
   startingAmount?: number;
   accountType?: string;
   accountGroup?: AccountGroup;
+  includeInSummary?: boolean;
 }
 
 export interface CreateAccountResult {
@@ -26,6 +27,7 @@ export interface CreateAccountResult {
     opening_balance?: number;
     account_type?: string;
     account_group?: AccountGroup;
+    include_in_summary?: boolean;
   };
 }
 
@@ -35,6 +37,8 @@ export interface UpdateAccountInput {
   openingAmount: number;
   /** Omitted by callers that don't change the group; the stored group is then kept. */
   accountGroup?: AccountGroup;
+  /** Omitted by callers that don't change summary inclusion; the stored value is kept. */
+  includeInSummary?: boolean;
 }
 
 export interface AccountActionResult {
@@ -66,6 +70,7 @@ export async function createAccountAction({
   startingAmount = 0,
   accountType = "other",
   accountGroup = DEFAULT_NEW_ACCOUNT_GROUP,
+  includeInSummary = true,
 }: CreateAccountInput): Promise<CreateAccountResult> {
   const supabase = await createClient();
   const {
@@ -84,6 +89,9 @@ export async function createAccountAction({
   if (!isAccountGroup(accountGroup)) {
     return { success: false, error: ACCOUNT_GROUP_ERROR };
   }
+  if (typeof includeInSummary !== "boolean") {
+    return { success: false, error: "Choose whether to include this account in financial summaries." };
+  }
 
   const parsedAmount =
     typeof startingAmount === "number" && !isNaN(startingAmount)
@@ -98,8 +106,9 @@ export async function createAccountAction({
       account_type: accountType || "other",
       opening_balance: parsedAmount,
       account_group: accountGroup,
+      include_in_summary: includeInSummary,
     })
-    .select("id, name, opening_balance, account_type, account_group")
+    .select("id, name, opening_balance, account_type, account_group, include_in_summary")
     .single();
 
   if (error) {
@@ -122,6 +131,7 @@ export async function updateAccountAction({
   name,
   openingAmount,
   accountGroup,
+  includeInSummary,
 }: UpdateAccountInput): Promise<AccountActionResult> {
   const { supabase, user } = await getAccountActionContext();
 
@@ -140,6 +150,9 @@ export async function updateAccountAction({
   if (accountGroup !== undefined && !isAccountGroup(accountGroup)) {
     return { success: false, error: ACCOUNT_GROUP_ERROR };
   }
+  if (includeInSummary !== undefined && typeof includeInSummary !== "boolean") {
+    return { success: false, error: "Choose whether to include this account in financial summaries." };
+  }
 
   const { data, error } = await supabase
     .from("accounts")
@@ -148,6 +161,9 @@ export async function updateAccountAction({
       opening_balance: openingAmount,
       // Only the group column changes; id, balance and transactions are untouched.
       ...(accountGroup !== undefined ? { account_group: accountGroup } : {}),
+      ...(includeInSummary !== undefined
+        ? { include_in_summary: includeInSummary }
+        : {}),
       updated_at: new Date().toISOString(),
     })
     .eq("id", accountId)

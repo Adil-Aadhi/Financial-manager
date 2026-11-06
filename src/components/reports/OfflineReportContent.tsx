@@ -10,6 +10,7 @@ import { ReportOverview } from "@/components/reports/ReportOverview";
 import { Alert } from "@/components/ui/Alert";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { normalizeIncludeInSummary } from "@/lib/accountSummary";
 import { offlineDb } from "@/lib/offline/db";
 import { useOfflineRefresh } from "@/lib/offline/useOfflineRefresh";
 import { useLocalContentMark } from "@/lib/perf";
@@ -81,6 +82,7 @@ export function OfflineReportContent({
         name: account.name,
         currency: account.currency,
         trashed: Boolean(account.deleted_at),
+        include_in_summary: normalizeIncludeInSummary(account.include_in_summary),
       })),
       categories.map((category) => ({
         id: category.id,
@@ -113,8 +115,16 @@ export function OfflineReportContent({
           <Card>
             <EmptyState
               icon={<CalendarSearch className="h-5 w-5" />}
-              title="No transactions in this period"
-              description="Pick another range, or add a transaction with +."
+              title={
+                report.accounts.length > 0
+                  ? "No included account activity in this period"
+                  : "No transactions in this period"
+              }
+              description={
+                report.accounts.length > 0
+                  ? "Excluded accounts remain available in the account report below."
+                  : "Pick another range, or add a transaction with +."
+              }
               className="py-12"
             />
           </Card>
@@ -126,8 +136,14 @@ export function OfflineReportContent({
               <CategoryBreakdown key={`expense-${sectionKey}`} title="Expense breakdown" type="expense" items={report.expenseCategories} total={report.expense} currency={currency} />
               <CategoryBreakdown key={`income-${sectionKey}`} title="Income breakdown" type="income" items={report.incomeCategories} total={report.income} currency={currency} />
             </div>
-            <AccountReport accounts={report.accounts} currency={currency} hiddenCurrencyCount={report.currencies.length - 1} />
           </>
+        )}
+        {report.accounts.length > 0 && (
+          <AccountReport
+            accounts={report.accounts}
+            currency={currency}
+            hiddenCurrencyCount={report.currencies.length - 1}
+          />
         )}
         {!localReport && !serverAggregated && (
           <p className="text-center text-[11px] text-fg-subtle">

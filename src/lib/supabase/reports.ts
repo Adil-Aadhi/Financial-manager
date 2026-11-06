@@ -5,6 +5,7 @@ import type {
   ReportRange,
   ReportRollupRow,
 } from "@/lib/reports";
+import { normalizeIncludeInSummary } from "@/lib/accountSummary";
 import { normalizeTransactionDate, transactionDateRangeBounds } from "@/lib/transactions";
 
 type ServerClient = Awaited<ReturnType<typeof createClient>>;
@@ -103,7 +104,10 @@ export async function getReportSource(
   const [rollupResult, accountsResult, categoriesResult] = await Promise.all([
     rollupPage(supabase, range, 0),
     // All accounts, including ones in Trash: their history still counts.
-    supabase.from("accounts").select("id, name, currency, deleted_at").eq("user_id", userId),
+    supabase
+      .from("accounts")
+      .select("id, name, currency, include_in_summary, deleted_at")
+      .eq("user_id", userId),
     supabase
       .from("categories")
       .select("id, name, icon")
@@ -111,13 +115,32 @@ export async function getReportSource(
   ]);
 
   let accountRows = accountsResult.data as
-    | { id: string; name: string; currency: string | null; deleted_at?: string | null }[]
+    | {
+        id: string;
+        name: string;
+        currency: string | null;
+        include_in_summary?: boolean | null;
+        deleted_at?: string | null;
+      }[]
     | null;
   if (accountsResult.error?.code === "42703") {
-    // Account-trash migration not applied: no deleted_at column yet.
-    const legacy = await supabase.from("accounts").select("id, name, currency").eq("user_id", userId);
-    if (legacy.error) throw new Error(legacy.error.message);
-    accountRows = legacy.data;
+    const preSummary = await supabase
+      .from("accounts")
+      .select("id, name, currency, deleted_at")
+      .eq("user_id", userId);
+    if (!preSummary.error) {
+      accountRows = preSummary.data;
+    } else if (preSummary.error.code === "42703") {
+      // Account-trash migration not applied: no deleted_at column yet.
+      const legacy = await supabase
+        .from("accounts")
+        .select("id, name, currency")
+        .eq("user_id", userId);
+      if (legacy.error) throw new Error(legacy.error.message);
+      accountRows = legacy.data;
+    } else {
+      throw new Error(preSummary.error.message);
+    }
   } else if (accountsResult.error) {
     throw new Error(accountsResult.error.message);
   }
@@ -152,6 +175,7 @@ export async function getReportSource(
       name: account.name,
       currency: account.currency,
       trashed: Boolean(account.deleted_at),
+      include_in_summary: normalizeIncludeInSummary(account.include_in_summary),
     })),
     categories: (categoriesResult.data ?? []).map((category) => ({
       id: String(category.id),
