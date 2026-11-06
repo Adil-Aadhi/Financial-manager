@@ -1,6 +1,6 @@
 export interface QueuePolicyEntry {
   seq?: number;
-  entity: "transaction" | "account" | "category" | "budget";
+  entity: "transaction" | "account" | "category" | "budget" | "daily_expense" | "daily_limit";
   entityId: string;
   op: "CREATE" | "UPDATE" | "DELETE";
   payload: Record<string, unknown>;

@@ -1,6 +1,8 @@
 import type {
   LocalAccount,
   LocalCategory,
+  LocalDailyBudgetExpense,
+  LocalDailyBudgetLimit,
   LocalMonthlyBudget,
   LocalTransaction,
   OutboxEntry,
@@ -12,6 +14,9 @@ export interface LocalSnapshotRows {
   categories: LocalCategory[];
   transactions: LocalTransaction[];
   budget: LocalMonthlyBudget | null;
+  /** Daily Budget Tracker rows. Optional so callers written before the feature still work. */
+  dailyLimits?: LocalDailyBudgetLimit[];
+  dailyExpenses?: LocalDailyBudgetExpense[];
 }
 
 function byId<T extends { id: string }>(rows: T[]) {
@@ -32,6 +37,12 @@ export function overlayOutbox(
   const transactions = byId(server.transactions);
   const previousTransactions = byId(previous.transactions);
   let budget = server.budget;
+  const dailyLimits = new Map((server.dailyLimits ?? []).map((row) => [row.effective_date, row]));
+  const previousDailyLimits = new Map(
+    (previous.dailyLimits ?? []).map((row) => [row.effective_date, row])
+  );
+  const dailyExpenses = byId(server.dailyExpenses ?? []);
+  const previousDailyExpenses = byId(previous.dailyExpenses ?? []);
 
   for (const entry of [...entries].sort((left, right) => (left.seq ?? 0) - (right.seq ?? 0))) {
     if (entry.ownerId !== ownerId) continue;
@@ -103,6 +114,41 @@ export function overlayOutbox(
       continue;
     }
 
+    if (entry.entity === "daily_expense") {
+      if (entry.op === "DELETE") {
+        dailyExpenses.delete(entry.entityId);
+        continue;
+      }
+      const base = dailyExpenses.get(entry.entityId) ?? previousDailyExpenses.get(entry.entityId);
+      if (base || entry.op === "CREATE") {
+        dailyExpenses.set(entry.entityId, {
+          ...(base ?? ({} as LocalDailyBudgetExpense)),
+          ...entry.payload,
+          ownerId,
+          id: entry.entityId,
+          user_id: ownerId,
+        } as LocalDailyBudgetExpense);
+      }
+      continue;
+    }
+
+    if (entry.entity === "daily_limit") {
+      // Keyed by effective date: CREATE and UPDATE both set that day's limit.
+      if (entry.op === "DELETE") {
+        dailyLimits.delete(entry.entityId);
+        continue;
+      }
+      const base = dailyLimits.get(entry.entityId) ?? previousDailyLimits.get(entry.entityId);
+      dailyLimits.set(entry.entityId, {
+        ...(base ?? ({} as LocalDailyBudgetLimit)),
+        ...entry.payload,
+        ownerId,
+        effective_date: entry.entityId,
+        user_id: ownerId,
+      } as LocalDailyBudgetLimit);
+      continue;
+    }
+
     if (entry.op === "DELETE") {
       budget = null;
     } else {
@@ -121,5 +167,7 @@ export function overlayOutbox(
     categories: [...categories.values()],
     transactions: [...transactions.values()],
     budget,
+    dailyLimits: [...dailyLimits.values()],
+    dailyExpenses: [...dailyExpenses.values()],
   };
 }

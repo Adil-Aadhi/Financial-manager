@@ -1,6 +1,12 @@
 /** Wire types shared by the client sync engine and the sync Server Action. */
 
-export type SyncEntity = "transaction" | "account" | "category" | "budget";
+export type SyncEntity =
+  | "transaction"
+  | "account"
+  | "category"
+  | "budget"
+  | "daily_expense"
+  | "daily_limit";
 export type SyncOp = "CREATE" | "UPDATE" | "DELETE";
 export type TransactionDateIntent = "unchanged" | "changed";
 export type SyncReviewReason = "legacy-transaction-date";

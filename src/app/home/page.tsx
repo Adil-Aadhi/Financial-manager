@@ -5,7 +5,10 @@ import {
   type HomeAccount,
   type HomeTransaction,
 } from "@/components/home/OfflineHomeDashboard";
+import { DailyBudgetHomeCard } from "@/components/dailyBudget/DailyBudgetHomeCard";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
+import { dailyBudgetToday, monthFirstDay, monthOfDate } from "@/lib/dailyBudget";
+import { getDailyBudgetServerData } from "@/lib/supabase/dailyBudget";
 import { getTransactionMonthRange } from "@/lib/month";
 import { getMonthlyBudgetOverview } from "@/lib/supabase/budget";
 import { getAuthenticatedUserProfile } from "@/lib/supabase/profile";
@@ -26,8 +29,9 @@ export default async function HomePage() {
   const name = profile.full_name || user.email?.split("@")[0] || "there";
   const month = getTransactionMonthRange();
   const supabase = await createClient();
+  const today = dailyBudgetToday();
 
-  const [accountsResult, transactionsResult, budget] = await Promise.all([
+  const [accountsResult, transactionsResult, budget, dailyBudget] = await Promise.all([
     supabase
       .from("accounts")
       .select("id, name, opening_balance, currency, include_in_summary, deleted_at, created_at")
@@ -40,6 +44,8 @@ export default async function HomePage() {
       .order("transaction_date", { ascending: false })
       .order("created_at", { ascending: false }),
     getMonthlyBudgetOverview(supabase, user.id, profile.default_currency, month),
+    // Independent Daily Budget Tracker: only its own tables, current month's entries.
+    getDailyBudgetServerData(supabase, user.id, monthFirstDay(monthOfDate(today))),
   ]);
 
   let accounts: HomeAccount[] = (accountsResult.data ?? []).map((account) => ({
@@ -117,6 +123,14 @@ export default async function HomePage() {
         currency={profile.default_currency}
         month={month}
         serverSnapshot={{ accounts, transactions, budget }}
+        dailyBudgetCard={
+          <DailyBudgetHomeCard
+            ownerId={user.id}
+            currency={profile.default_currency}
+            server={dailyBudget}
+            serverToday={today}
+          />
+        }
       />
     </AppShell>
   );

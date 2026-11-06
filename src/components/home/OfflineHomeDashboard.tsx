@@ -65,11 +65,14 @@ export function OfflineHomeDashboard({
   currency,
   month,
   serverSnapshot,
+  dailyBudgetCard,
 }: {
   ownerId: string;
   currency: SupportedCurrency;
   month: MonthRange;
   serverSnapshot: HomeSnapshot;
+  /** Daily Budget Tracker card, shown directly above the Monthly Budget card. */
+  dailyBudgetCard?: React.ReactNode;
 }) {
   const serverVersion = [
     ...serverSnapshot.accounts.map((account) => `${account.id}:${account.opening_balance}:${account.deleted_at ?? ""}:${normalizeIncludeInSummary(account.include_in_summary)}`),
@@ -152,6 +155,7 @@ export function OfflineHomeDashboard({
       snapshot={localSnapshot?.snapshot ?? serverSnapshot}
       currency={localSnapshot?.currency ?? currency}
       month={month}
+      dailyBudgetCard={dailyBudgetCard}
     />
   );
 }
@@ -164,10 +168,12 @@ function HomeDashboard({
   snapshot,
   currency,
   month,
+  dailyBudgetCard,
 }: {
   snapshot: HomeSnapshot;
   currency: SupportedCurrency;
   month: MonthRange;
+  dailyBudgetCard?: React.ReactNode;
 }) {
   const data = useMemo(() => calculateDashboard(snapshot, currency, month.prefix), [snapshot, currency, month.prefix]);
 
@@ -198,6 +204,8 @@ function HomeDashboard({
         </div>
         <p className="relative mt-3 text-[11px] text-fg-subtle">This month</p>
       </section>
+
+      {dailyBudgetCard}
 
       <MonthlyBudgetCard
         available={snapshot.budget.available}
