@@ -8,11 +8,19 @@ import {
 } from "@/app/actions/accounts";
 import type { AccountListItem } from "@/components/accounts/AccountList";
 import { AccountGroupSelector } from "@/components/accounts/AccountGroupSelector";
-import { normalizeAccountGroup, type AccountGroup } from "@/lib/accounts";
+import {
+  normalizeAccountGroup,
+  type AccountGroup,
+} from "@/lib/accounts";
+import {
+  changedIncludeInSummary,
+  normalizeIncludeInSummary,
+} from "@/lib/accountSummary";
 import { markOfflineDataStale } from "@/lib/offline/bootstrap";
 import { runMutation, trashAccountLocally, updateAccountLocally } from "@/lib/offline/mutations";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
+import { Checkbox } from "@/components/ui/Checkbox";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 
@@ -31,6 +39,9 @@ export function EditAccountModal({
   const [name, setName] = useState(account.name);
   const [accountGroup, setAccountGroup] = useState<AccountGroup>(
     normalizeAccountGroup(account.account_group)
+  );
+  const [includeInSummary, setIncludeInSummary] = useState(
+    normalizeIncludeInSummary(account.include_in_summary)
   );
   const [openingAmount, setOpeningAmount] = useState(
     String(Number(account.opening_balance) || 0)
@@ -57,11 +68,18 @@ export function EditAccountModal({
     }
 
     startTransition(async () => {
+      const changedSummaryInclusion = changedIncludeInSummary(
+        account.include_in_summary,
+        includeInSummary
+      );
       const input = {
         accountId: account.id,
         name: trimmedName,
         openingAmount: parsedAmount,
         accountGroup,
+        ...(changedSummaryInclusion !== undefined
+          ? { includeInSummary: changedSummaryInclusion }
+          : {}),
       };
       const result = await runMutation({
         local: (ownerId) => updateAccountLocally(ownerId, input),
@@ -84,7 +102,7 @@ export function EditAccountModal({
       isOpen={isOpen}
       onClose={onClose}
       title="Edit Account"
-      description="Update the account name, opening amount, or group."
+      description="Update the account name, opening amount, group, or summary inclusion."
       size="md"
     >
       <form onSubmit={handleSubmit} noValidate className="space-y-5">
@@ -122,6 +140,15 @@ export function EditAccountModal({
         />
 
         <AccountGroupSelector value={accountGroup} onChange={setAccountGroup} disabled={isPending} />
+
+        <Checkbox
+          id={`edit-account-summary-${account.id}`}
+          checked={includeInSummary}
+          onChange={(event) => setIncludeInSummary(event.target.checked)}
+          label="Include in Financial Summaries"
+          description="Include this account in dashboard totals, consolidated reports and category breakdowns."
+          disabled={isPending}
+        />
 
         <div className="flex items-center justify-end gap-3 border-t border-line pt-3">
           <Button

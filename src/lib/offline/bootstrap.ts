@@ -2,6 +2,7 @@ import "client-only";
 
 import type { User } from "@supabase/supabase-js";
 import { normalizeAccountGroup } from "@/lib/accounts";
+import { normalizeIncludeInSummary } from "@/lib/accountSummary";
 import { offlineDb, type LocalSyncMeta, type LocalVerificationTotals } from "@/lib/offline/db";
 import { overlayOutbox } from "@/lib/offline/snapshotOverlay";
 import { createClient } from "@/lib/supabase/client";
@@ -54,6 +55,7 @@ interface AccountRow {
   opening_balance: number | string | null;
   currency: string | null;
   account_group?: string | null;
+  include_in_summary?: boolean | null;
   deleted_at?: string | null;
   created_at: string;
   updated_at?: string | null;
@@ -65,7 +67,7 @@ interface AccountRow {
  * account-group regression tests check the downloaded rows against this list.
  */
 export const ACCOUNT_SNAPSHOT_COLUMNS =
-  "id, user_id, name, account_type, opening_balance, currency, account_group, deleted_at, created_at, updated_at";
+  "id, user_id, name, account_type, opening_balance, currency, account_group, include_in_summary, deleted_at, created_at, updated_at";
 
 interface CategoryRow {
   id: string;
@@ -140,13 +142,32 @@ async function downloadSnapshot(user: User) {
     .eq("id", user.id)
     .maybeSingle();
 
-  const accountsPromise = fetchEveryPage<AccountRow>("Accounts", (from, to) =>
-    supabase
-      .from("accounts")
-      .select(ACCOUNT_SNAPSHOT_COLUMNS)
-      .eq("user_id", user.id)
-      .order("id")
-      .range(from, to)
+  const fetchAccounts = () =>
+    fetchEveryPage<AccountRow>("Accounts", (from, to) =>
+      supabase
+        .from("accounts")
+        .select(ACCOUNT_SNAPSHOT_COLUMNS)
+        .eq("user_id", user.id)
+        .order("id")
+        .range(from, to)
+    );
+  const fetchLegacyAccounts = () =>
+    fetchEveryPage<AccountRow>("Accounts", (from, to) =>
+      supabase
+        .from("accounts")
+        .select(
+          "id, user_id, name, account_type, opening_balance, currency, account_group, deleted_at, created_at, updated_at"
+        )
+        .eq("user_id", user.id)
+        .order("id")
+        .range(from, to)
+    );
+  const accountsPromise = fetchAccounts().catch(
+    async (error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.includes("include_in_summary")) throw error;
+      return fetchLegacyAccounts();
+    }
   );
 
   const categoriesPromise = fetchEveryPage<CategoryRow>("Categories", (from, to) =>
@@ -258,6 +279,7 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
             ownerId,
             ...account,
             account_group: normalizeAccountGroup(account.account_group),
+            include_in_summary: normalizeIncludeInSummary(account.include_in_summary),
             deleted_at: account.deleted_at ?? null,
           })),
           categories: snapshot.categories.map((category) => ({ ownerId, ...category })),

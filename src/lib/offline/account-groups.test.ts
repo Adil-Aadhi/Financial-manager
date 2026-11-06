@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { normalizeAccountGroup } from "@/lib/accounts";
+import { normalizeIncludeInSummary } from "@/lib/accountSummary";
 import { runSyncBatch } from "@/lib/server/syncApply";
 import { offlineDb, type OutboxEntry } from "@/lib/offline/db";
 import {
@@ -113,6 +114,7 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null; count?: num
         // Mirrors the real column defaults.
         if (row.deleted_at === undefined) row.deleted_at = null;
         if (row.account_group === undefined) row.account_group = "general";
+        if (row.include_in_summary === undefined) row.include_in_summary = true;
         if (row.currency === undefined) row.currency = "INR";
       }
       rows.set(String(row.id ?? row.user_id), row);
@@ -164,7 +166,10 @@ function wire(entry: OutboxEntry): SyncOperation {
 }
 
 /** Server state: one General account with one income transaction (balance 10 + 5). */
-function seedServer(group: "primary" | "general" = "general") {
+function seedServer(
+  group: "primary" | "general" = "general",
+  includeInSummary = true
+) {
   const store = new FakeStore();
   store.rows("profiles").set(ownerId, { id: ownerId, full_name: "Test", avatar_url: null, default_currency: "INR" });
   store.rows("accounts").set(accountId, {
@@ -175,6 +180,7 @@ function seedServer(group: "primary" | "general" = "general") {
     opening_balance: 10,
     currency: "INR",
     account_group: group,
+    include_in_summary: includeInSummary,
     deleted_at: null,
     created_at: BASE,
     updated_at: BASE,
@@ -257,6 +263,12 @@ async function syncAll(store: FakeStore) {
 
 async function localGroup(id = accountId) {
   return normalizeAccountGroup((await offlineDb.accounts.get([ownerId, id]))?.account_group);
+}
+
+async function localSummaryInclusion(id = accountId) {
+  return normalizeIncludeInSummary(
+    (await offlineDb.accounts.get([ownerId, id]))?.include_in_summary
+  );
 }
 
 beforeEach(async () => {
@@ -426,6 +438,205 @@ describe("account groups: switching (disappearing-account regression)", () => {
     ]);
     expect(response.results).toMatchObject([{ status: "rejected" }]);
     expect(store.rows("accounts").get(accountId)?.account_group).toBe("general");
+  });
+});
+
+describe("account summary inclusion: offline and sync", () => {
+  it("defaults new offline accounts to included and persists the default", async () => {
+    const store = seedServer();
+    await createAccountLocally(ownerId, { name: "Wallet" });
+    const [entry] = await offlineDb.outbox.toArray();
+
+    expect(entry.payload.include_in_summary).toBe(true);
+    expect(await localSummaryInclusion(entry.entityId)).toBe(true);
+
+    await syncAll(store);
+    expect(store.rows("accounts").get(entry.entityId)?.include_in_summary).toBe(true);
+  });
+
+  it("lets a queued CREATE from an older app use the database default", async () => {
+    const store = seedServer();
+    await createAccountLocally(ownerId, { name: "Old queued account" });
+    const [entry] = await offlineDb.outbox.toArray();
+    const { include_in_summary: _dropped, ...legacyPayload } = entry.payload;
+    void _dropped;
+    await offlineDb.outbox.update(entry.seq!, { payload: legacyPayload });
+
+    await syncAll(store);
+
+    expect(store.rows("accounts").get(entry.entityId)?.include_in_summary).toBe(true);
+  });
+
+  it("treats an existing cached account without the setting as included", async () => {
+    seedServer();
+    expect(
+      (await offlineDb.accounts.get([ownerId, accountId]))?.include_in_summary
+    ).toBeUndefined();
+    expect(await localSummaryInclusion()).toBe(true);
+  });
+
+  it("updates the local account immediately and synchronizes an opt-out", async () => {
+    const store = seedServer();
+    await updateAccountLocally(ownerId, {
+      accountId,
+      name: "Cash",
+      openingAmount: 10,
+      includeInSummary: false,
+    });
+
+    expect(await localSummaryInclusion()).toBe(false);
+    expect((await offlineDb.outbox.toArray())[0].payload.include_in_summary).toBe(false);
+
+    await syncAll(store);
+    expect(store.rows("accounts").get(accountId)?.include_in_summary).toBe(false);
+    await ensureOfflineBootstrap(ownerId, true);
+    expect(await localSummaryInclusion()).toBe(false);
+  });
+
+  it("keeps an offline opt-out after the local database is reopened", async () => {
+    seedServer();
+    await updateAccountLocally(ownerId, {
+      accountId,
+      name: "Cash",
+      openingAmount: 10,
+      includeInSummary: false,
+    });
+
+    offlineDb.close();
+    await offlineDb.open();
+
+    expect(await localSummaryInclusion()).toBe(false);
+    expect((await offlineDb.outbox.toArray())[0].payload.include_in_summary).toBe(false);
+  });
+
+  it("keeps a pending local opt-out over an older server snapshot", async () => {
+    seedServer("general", true);
+    await updateAccountLocally(ownerId, {
+      accountId,
+      name: "Cash",
+      openingAmount: 10,
+      includeInSummary: false,
+    });
+
+    await ensureOfflineBootstrap(ownerId, true);
+
+    expect(await localSummaryInclusion()).toBe(false);
+    expect((await offlineDb.outbox.toArray())[0].payload.include_in_summary).toBe(false);
+  });
+
+  it("replays a retried change followed by a newer choice so the latest value wins", async () => {
+    const store = seedServer("general", true);
+    await updateAccountLocally(ownerId, {
+      accountId,
+      name: "Cash",
+      openingAmount: 10,
+      includeInSummary: false,
+    });
+    const [first] = await offlineDb.outbox.toArray();
+
+    // The server applied the first operation but its response was lost.
+    await runSyncBatch(store as never, ownerId, [wire(first)]);
+    await offlineDb.outbox.update(first.seq!, { attempts: 1 });
+    await updateAccountLocally(ownerId, {
+      accountId,
+      name: "Cash",
+      openingAmount: 10,
+      includeInSummary: true,
+    });
+
+    const queued = await offlineDb.outbox.orderBy("seq").toArray();
+    expect(queued.map((entry) => entry.payload.include_in_summary)).toEqual([
+      false,
+      true,
+    ]);
+
+    const overlaid = overlayOutbox(
+      ownerId,
+      {
+        accounts: [
+          { ...(store.rows("accounts").get(accountId) as Row), ownerId } as never,
+        ],
+        categories: [],
+        transactions: [],
+        budget: null,
+      },
+      { accounts: [], categories: [], transactions: [], budget: null },
+      queued
+    );
+    expect(overlaid.accounts[0].include_in_summary).toBe(true);
+
+    await syncAll(store);
+    expect(store.rows("accounts").get(accountId)?.include_in_summary).toBe(true);
+  });
+
+  it("coalesces unsent toggles so only the latest value is synchronized", async () => {
+    const store = seedServer("general", true);
+    await updateAccountLocally(ownerId, {
+      accountId,
+      name: "Cash",
+      openingAmount: 10,
+      includeInSummary: false,
+    });
+    await updateAccountLocally(ownerId, {
+      accountId,
+      name: "Cash",
+      openingAmount: 10,
+      includeInSummary: true,
+    });
+    await updateAccountLocally(ownerId, {
+      accountId,
+      name: "Cash",
+      openingAmount: 10,
+      includeInSummary: false,
+    });
+
+    const queued = await offlineDb.outbox.toArray();
+    expect(queued).toHaveLength(1);
+    expect(queued[0].payload.include_in_summary).toBe(false);
+
+    await syncAll(store);
+    expect(store.rows("accounts").get(accountId)?.include_in_summary).toBe(false);
+  });
+
+  it("does not let a stale cached name edit restore an older setting", async () => {
+    const store = seedServer("general", false);
+    // The device still has the legacy/missing value, which normalizes to true,
+    // while another device has already opted this account out on the server.
+    expect(await localSummaryInclusion()).toBe(true);
+    await updateAccountLocally(ownerId, {
+      accountId,
+      name: "Cash box",
+      openingAmount: 10,
+    });
+    const [entry] = await offlineDb.outbox.toArray();
+
+    expect(entry.payload).not.toHaveProperty("include_in_summary");
+    await syncAll(store);
+
+    expect(store.rows("accounts").get(accountId)).toMatchObject({
+      name: "Cash box",
+      include_in_summary: false,
+    });
+  });
+
+  it("does not let a stale cached opening-balance edit restore an older setting", async () => {
+    const store = seedServer("general", false);
+    expect(await localSummaryInclusion()).toBe(true);
+    await updateAccountLocally(ownerId, {
+      accountId,
+      name: "Cash",
+      openingAmount: 25,
+    });
+    const [entry] = await offlineDb.outbox.toArray();
+
+    expect(entry.payload).toMatchObject({ opening_balance: 25 });
+    expect(entry.payload).not.toHaveProperty("include_in_summary");
+    await syncAll(store);
+
+    expect(store.rows("accounts").get(accountId)).toMatchObject({
+      opening_balance: 25,
+      include_in_summary: false,
+    });
   });
 });
 

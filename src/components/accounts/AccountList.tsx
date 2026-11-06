@@ -19,6 +19,7 @@ export interface AccountListItem {
   opening_balance: number | string | null;
   currency: string | null;
   account_group?: AccountGroup | string | null;
+  include_in_summary?: boolean | null;
   total_income?: number | string | null;
   total_expense?: number | string | null;
 }

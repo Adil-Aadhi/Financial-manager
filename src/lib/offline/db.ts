@@ -27,6 +27,8 @@ export interface LocalAccount {
    * have no value; read it with normalizeAccountGroup (missing = General).
    */
   account_group?: AccountGroup;
+  /** Missing on legacy cached rows; read as true through normalizeIncludeInSummary(). */
+  include_in_summary?: boolean;
   deleted_at: string | null;
   created_at: string;
   updated_at?: string | null;

@@ -24,6 +24,7 @@ import { useOfflineRefresh } from "@/lib/offline/useOfflineRefresh";
 import { useLocalContentMark } from "@/lib/perf";
 import type { MonthRange } from "@/lib/month";
 import type { SupportedCurrency } from "@/lib/supabase/profile";
+import { normalizeIncludeInSummary } from "@/lib/accountSummary";
 import { normalizeTransactionDate } from "@/lib/transactions";
 
 export interface HomeAccount {
@@ -32,6 +33,7 @@ export interface HomeAccount {
   opening_balance: number | string | null;
   currency: string | null;
   deleted_at?: string | null;
+  include_in_summary?: boolean | null;
   created_at: string;
 }
 
@@ -47,7 +49,7 @@ export interface HomeTransaction {
   category: { name: string; icon: string } | null;
 }
 
-interface HomeSnapshot {
+export interface HomeSnapshot {
   accounts: HomeAccount[];
   transactions: HomeTransaction[];
   budget: {
@@ -70,7 +72,7 @@ export function OfflineHomeDashboard({
   serverSnapshot: HomeSnapshot;
 }) {
   const serverVersion = [
-    ...serverSnapshot.accounts.map((account) => `${account.id}:${account.opening_balance}:${account.deleted_at ?? ""}`),
+    ...serverSnapshot.accounts.map((account) => `${account.id}:${account.opening_balance}:${account.deleted_at ?? ""}:${normalizeIncludeInSummary(account.include_in_summary)}`),
     ...serverSnapshot.transactions.map((transaction) => `${transaction.id}:${transaction.amount}:${transaction.created_at}`),
     `budget:${serverSnapshot.budget.limit}:${serverSnapshot.budget.spent}`,
   ].join("|");
@@ -99,7 +101,8 @@ export function OfflineHomeDashboard({
     for (const transaction of transactions) {
       if (
         transaction.type !== "expense" ||
-        !normalizeTransactionDate(transaction.transaction_date)?.startsWith(month.prefix)
+        !normalizeTransactionDate(transaction.transaction_date)?.startsWith(month.prefix) ||
+        !normalizeIncludeInSummary(accountById.get(transaction.account_id)?.include_in_summary)
       ) continue;
       const accountCurrency = accountById.get(transaction.account_id)?.currency || localCurrency;
       if (accountCurrency === localCurrency) spent += Number(transaction.amount) || 0;
@@ -113,6 +116,7 @@ export function OfflineHomeDashboard({
         opening_balance: account.opening_balance,
         currency: account.currency,
         deleted_at: account.deleted_at,
+        include_in_summary: normalizeIncludeInSummary(account.include_in_summary),
         created_at: account.created_at,
       })),
       transactions: transactions.map((transaction) => {
@@ -184,8 +188,8 @@ function HomeDashboard({
         </p>
         <p className="relative mt-2 text-xs text-fg-subtle">
           {data.currencyAccountCount === 0
-            ? "No accounts in this currency"
-            : `Across ${data.currencyAccountCount} ${currency} account${data.currencyAccountCount === 1 ? "" : "s"}`}
+            ? "No included accounts in this currency"
+            : `Across ${data.currencyAccountCount} included ${currency} account${data.currencyAccountCount === 1 ? "" : "s"}`}
         </p>
         <div className="relative mt-5 grid grid-cols-3 gap-2 sm:mt-6 sm:gap-3">
           <MonthStat label="Income" value={formatMoney(data.monthIncome, currency, { compact: true })} icon={<ArrowDownLeft className="h-3.5 w-3.5" />} tone="positive" />
@@ -266,10 +270,14 @@ function HomeDashboard({
   );
 }
 
-function calculateDashboard(snapshot: HomeSnapshot, currency: SupportedCurrency, monthPrefix: string) {
+export function calculateDashboard(snapshot: HomeSnapshot, currency: SupportedCurrency, monthPrefix: string) {
   const activeAccounts = snapshot.accounts.filter((account) => !account.deleted_at).sort((a, b) => b.created_at.localeCompare(a.created_at));
   const accountById = new Map(activeAccounts.map((account) => [account.id, account]));
   const activeIds = new Set(accountById.keys());
+  const summaryAccounts = activeAccounts.filter((account) =>
+    normalizeIncludeInSummary(account.include_in_summary)
+  );
+  const summaryIds = new Set(summaryAccounts.map((account) => account.id));
   const transactions = snapshot.transactions.filter((transaction) => activeIds.has(transaction.account_id));
   const totalsByAccount = new Map<string, { income: number; expense: number }>();
   const spendByCategory = new Map<string, { name: string; icon: string; total: number }>();
@@ -277,7 +285,7 @@ function calculateDashboard(snapshot: HomeSnapshot, currency: SupportedCurrency,
   let monthIncome = 0;
   let monthExpense = 0;
 
-  for (const account of activeAccounts) {
+  for (const account of summaryAccounts) {
     if ((account.currency || currency) === currency) balance += Number(account.opening_balance) || 0;
   }
   for (const transaction of transactions) {
@@ -287,6 +295,7 @@ function calculateDashboard(snapshot: HomeSnapshot, currency: SupportedCurrency,
     if (transaction.type === "expense") totals.expense += amount;
     totalsByAccount.set(transaction.account_id, totals);
 
+    if (!summaryIds.has(transaction.account_id)) continue;
     if ((accountById.get(transaction.account_id)?.currency || currency) !== currency) continue;
     if (transaction.type === "income") balance += amount;
     if (transaction.type === "expense") balance -= amount;
@@ -316,7 +325,7 @@ function calculateDashboard(snapshot: HomeSnapshot, currency: SupportedCurrency,
     monthIncome,
     monthExpense,
     saved: monthIncome - monthExpense,
-    currencyAccountCount: activeAccounts.filter((account) => (account.currency || currency) === currency).length,
+    currencyAccountCount: summaryAccounts.filter((account) => (account.currency || currency) === currency).length,
     topSpending: [...spendByCategory.values()].sort((a, b) => b.total - a.total),
   };
 }

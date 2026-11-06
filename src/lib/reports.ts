@@ -3,6 +3,8 @@
  * be shared by the server page and tested directly.
  */
 
+import { normalizeIncludeInSummary } from "@/lib/accountSummary";
+
 export const REPORT_PRESETS = [
   { id: "this-month", label: "This month" },
   { id: "last-month", label: "Last month" },
@@ -156,6 +158,7 @@ export interface ReportAccountMeta {
   name: string;
   currency: string | null;
   trashed: boolean;
+  include_in_summary?: boolean | null;
 }
 
 export interface ReportCategoryMeta {
@@ -191,6 +194,7 @@ export interface AccountTotal {
   expense: number;
   net: number;
   count: number;
+  include_in_summary: boolean;
 }
 
 export interface ReportData {
@@ -261,6 +265,27 @@ export function buildReport(
     const amount = Number(row.total) || 0;
     const rowCount = Number(row.tx_count) || 0;
     const isIncome = row.type === "income";
+    const accountMeta = accountById.get(row.account_id);
+    const includeInSummary = normalizeIncludeInSummary(
+      accountMeta?.include_in_summary
+    );
+    const accountEntry = accountMap.get(row.account_id) ?? {
+      id: row.account_id,
+      name: accountMeta?.name ?? "Deleted account",
+      trashed: accountMeta?.trashed ?? false,
+      income: 0,
+      expense: 0,
+      net: 0,
+      count: 0,
+      include_in_summary: includeInSummary,
+    };
+    if (isIncome) accountEntry.income += amount;
+    else accountEntry.expense += amount;
+    accountEntry.count += rowCount;
+    accountMap.set(row.account_id, accountEntry);
+
+    if (!includeInSummary) continue;
+
     count += rowCount;
     if (isIncome) income += amount;
     else expense += amount;
@@ -284,21 +309,6 @@ export function buildReport(
     entry.total += amount;
     entry.count += rowCount;
     target.set(categoryKey, entry);
-
-    const accountMeta = accountById.get(row.account_id);
-    const accountEntry = accountMap.get(row.account_id) ?? {
-      id: row.account_id,
-      name: accountMeta?.name ?? "Deleted account",
-      trashed: accountMeta?.trashed ?? false,
-      income: 0,
-      expense: 0,
-      net: 0,
-      count: 0,
-    };
-    if (isIncome) accountEntry.income += amount;
-    else accountEntry.expense += amount;
-    accountEntry.count += rowCount;
-    accountMap.set(row.account_id, accountEntry);
   }
 
   income = cents(income);

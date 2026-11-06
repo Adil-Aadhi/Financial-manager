@@ -31,4 +31,11 @@ export function normalizeAccountGroup(value: unknown): AccountGroup {
   return isAccountGroup(value) ? value : LEGACY_ACCOUNT_GROUP;
 }
 
+// Backward-compatible re-export. Runtime consumers import the dependency-free
+// account-summary module directly so client and server bundles share one module.
+export {
+  changedIncludeInSummary,
+  normalizeIncludeInSummary,
+} from "@/lib/accountSummary";
+
 export const ACCOUNT_GROUP_ERROR = "Choose Primary or General for this account.";
