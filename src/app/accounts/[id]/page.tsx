@@ -129,7 +129,8 @@ export default async function AccountDetailsPage({ params }: AccountPageProps) {
         type: row.type,
         amount: row.amount,
         description: row.description,
-        transaction_date: normalizeTransactionDate(row.transaction_date),
+        transaction_date:
+          normalizeTransactionDate(row.transaction_date) ?? row.transaction_date,
         transaction_time: row.transaction_time ?? null,
         created_at: row.created_at,
         updated_at: row.updated_at,

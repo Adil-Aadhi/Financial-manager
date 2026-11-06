@@ -9,6 +9,7 @@ import { describeChange } from "@/lib/offline/describeChange";
 import { OUTBOX_CHANGED_EVENT } from "@/lib/offline/events";
 import { selectRunnableEntries } from "@/lib/offline/queuePolicy";
 import { SYNC_BATCH_SIZE, type SyncBatchResponse, type SyncOperation, type SyncOpResult } from "@/lib/sync/types";
+import { normalizeTransactionDate } from "@/lib/transactions";
 
 /**
  * Offline sync engine (Phase 2). Replays the signed-in user's outbox to Supabase in `seq`
@@ -129,6 +130,7 @@ function toWire(entry: OutboxEntry): SyncOperation {
     entityId: entry.entityId,
     op: entry.op,
     payload: entry.payload,
+    transactionDateIntent: entry.transactionDateIntent,
     baseUpdatedAt: entry.baseUpdatedAt,
     editedAt: entry.updatedAt,
   };
@@ -311,7 +313,24 @@ async function settle(batch: OutboxEntry[], results: SyncOpResult[]) {
 
       if (result.status === "rejected") {
         rejected = true;
-        await offlineDb.outbox.update(entry.seq!, { status: "failed", error: result.error ?? "The server rejected this change.", nextAttemptAt: undefined });
+        await offlineDb.outbox.update(entry.seq!, {
+          status: "failed",
+          error: result.error ?? "The server rejected this change.",
+          reviewReason: result.reviewReason,
+          nextAttemptAt: undefined,
+        });
+        if (
+          result.reviewReason === "legacy-transaction-date" &&
+          result.serverTransactionDate
+        ) {
+          const serverDate = normalizeTransactionDate(result.serverTransactionDate);
+          if (serverDate) {
+            await offlineDb.transactions.update(
+              [entry.ownerId, entry.entityId],
+              { transaction_date: serverDate }
+            );
+          }
+        }
         continue;
       }
 

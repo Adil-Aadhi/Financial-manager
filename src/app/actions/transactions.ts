@@ -3,9 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { validateTransactionInput } from "@/lib/server/validation";
-import type {
-  TransactionFormOptions,
-  TransactionType,
+import {
+  isTransactionDateChange,
+  type TransactionFormOptions,
+  type TransactionType,
 } from "@/lib/transactions";
 
 export interface TransactionActionInput {
@@ -137,7 +138,7 @@ export async function updateTransactionAction(
 
   const { data: existing, error: existingError } = await supabase
     .from("transactions")
-    .select("id, account_id")
+    .select("id, account_id, transaction_date")
     .eq("id", input.transactionId)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -149,18 +150,22 @@ export async function updateTransactionAction(
   const validationError = await validateTransactionInput(input, user.id, supabase);
   if (validationError) return { success: false, error: validationError };
 
+  const changes: Record<string, string | number | null> = {
+    account_id: input.accountId,
+    category_id: input.categoryId,
+    type: input.type,
+    amount: input.amount,
+    description: input.remark?.trim() || null,
+    transaction_time: input.transactionTime ? `${input.transactionTime}:00` : null,
+    updated_at: new Date().toISOString(),
+  };
+  if (isTransactionDateChange(existing.transaction_date, input.transactionDate)) {
+    changes.transaction_date = input.transactionDate;
+  }
+
   const { data, error } = await supabase
     .from("transactions")
-    .update({
-      account_id: input.accountId,
-      category_id: input.categoryId,
-      type: input.type,
-      amount: input.amount,
-      description: input.remark?.trim() || null,
-      transaction_date: input.transactionDate,
-      transaction_time: input.transactionTime ? `${input.transactionTime}:00` : null,
-      updated_at: new Date().toISOString(),
-    })
+    .update(changes)
     .eq("id", input.transactionId)
     .eq("user_id", user.id)
     .select("id")

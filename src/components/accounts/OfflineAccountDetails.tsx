@@ -99,7 +99,9 @@ export function OfflineAccountDetails({
             type: transaction.type,
             amount: transaction.amount,
             description: transaction.description,
-            transaction_date: normalizeTransactionDate(transaction.transaction_date),
+            transaction_date:
+              normalizeTransactionDate(transaction.transaction_date) ??
+              transaction.transaction_date,
             transaction_time: transaction.transaction_time,
             created_at: transaction.created_at,
             updated_at: transaction.updated_at,

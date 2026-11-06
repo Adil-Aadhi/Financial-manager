@@ -31,10 +31,12 @@ import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { cn } from "@/lib/cn";
-import type {
-  TransactionFormOptions,
-  TransactionRecord,
-  TransactionType,
+import {
+  normalizeTransactionDate,
+  transactionDateTimeDefaults,
+  type TransactionFormOptions,
+  type TransactionRecord,
+  type TransactionType,
 } from "@/lib/transactions";
 
 export interface QuickTransactionModalProps {
@@ -49,13 +51,7 @@ export interface QuickTransactionModalProps {
 }
 
 function getLocalDateAndTime() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  const hours = String(now.getHours()).padStart(2, "0");
-  const minutes = String(now.getMinutes()).padStart(2, "0");
-  return { date: `${year}-${month}-${day}`, time: `${hours}:${minutes}` };
+  return transactionDateTimeDefaults();
 }
 
 function currencySymbol(code?: string | null) {
@@ -136,7 +132,9 @@ export function QuickTransactionModal({
   const [accountId, setAccountId] = useState(effectiveAccountId);
   const [categoryId, setCategoryId] = useState(transaction?.category_id ?? "");
   const [transactionDate, setTransactionDate] = useState(
-    transaction?.transaction_date ?? localDefaults.date
+    transaction
+      ? normalizeTransactionDate(transaction.transaction_date) ?? ""
+      : localDefaults.date
   );
   const [transactionTime, setTransactionTime] = useState(
     transaction?.transaction_time?.slice(0, 5) ?? (transaction ? "" : localDefaults.time)

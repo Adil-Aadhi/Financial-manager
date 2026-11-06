@@ -19,7 +19,12 @@ import {
   type OutboxEntry,
   type OutboxOperation,
 } from "@/lib/offline/db";
-import type { TransactionFormOptions, TransactionType } from "@/lib/transactions";
+import {
+  isTransactionDateChange,
+  type TransactionFormOptions,
+  type TransactionType,
+} from "@/lib/transactions";
+import type { TransactionDateIntent } from "@/lib/sync/types";
 import { canCoalesce } from "@/lib/offline/queuePolicy";
 
 /**
@@ -136,28 +141,55 @@ async function enqueue(
   entityId: string,
   op: OutboxOperation,
   payload: Record<string, unknown>,
-  baseUpdatedAt: string | null
+  baseUpdatedAt: string | null,
+  transactionDateIntent?: TransactionDateIntent
 ) {
   const now = new Date().toISOString();
-  const fresh = (finalOp: OutboxOperation, finalPayload: Record<string, unknown>, base: string | null): OutboxEntry => ({
-    opId: newId(),
-    ownerId,
-    entity,
-    entityId,
-    op: finalOp,
-    payload: finalPayload,
-    baseUpdatedAt: base,
-    createdAt: now,
-    updatedAt: now,
-    status: "pending",
-    attempts: 0,
-    error: null,
-  });
+  const fresh = (
+    finalOp: OutboxOperation,
+    finalPayload: Record<string, unknown>,
+    base: string | null,
+    dateIntent = transactionDateIntent
+  ): OutboxEntry => ({
+      opId: newId(),
+      ownerId,
+      entity,
+      entityId,
+      op: finalOp,
+      payload: finalPayload,
+      ...(entity === "transaction" && finalOp === "UPDATE" && dateIntent
+        ? { transactionDateIntent: dateIntent }
+        : {}),
+      baseUpdatedAt: base,
+      createdAt: now,
+      updatedAt: now,
+      status: "pending",
+      attempts: 0,
+      error: null,
+    });
 
   const existing = await offlineDb.outbox
     .where("[ownerId+entity+entityId]")
     .equals([ownerId, entity, entityId])
     .sortBy("seq");
+
+  // An older client could not record whether the transaction date changed. Once
+  // the server asks for review, a new form save is the reliable user decision:
+  // replace only those rejected entries and retain all of their non-date edits.
+  const reviewedLegacy = existing.filter(
+    (entry) =>
+      entity === "transaction" &&
+      op === "UPDATE" &&
+      transactionDateIntent !== undefined &&
+      entry.reviewReason === "legacy-transaction-date"
+  );
+  if (reviewedLegacy.length > 0) {
+    const base = reviewedLegacy[0].baseUpdatedAt;
+    const merged = Object.assign({}, ...reviewedLegacy.map((entry) => entry.payload), payload);
+    await offlineDb.outbox.bulkDelete(reviewedLegacy.map((entry) => entry.seq!));
+    await offlineDb.outbox.add(fresh("UPDATE", merged, base));
+    return;
+  }
   // Once an entry has been attempted, the server may already have applied it even when the
   // response never reached this device. Its opId and payload must stay immutable so a retry can
   // be recognised as already applied; later intent is appended as a separate operation.
@@ -173,7 +205,12 @@ async function enqueue(
       return;
     }
     const merged = Object.assign({}, ...existing.map((entry) => entry.payload), payload);
-    await offlineDb.outbox.add(fresh(createdHere ? "CREATE" : op, merged, base));
+    const previousIntent = [...existing]
+      .reverse()
+      .find((entry) => entry.transactionDateIntent)?.transactionDateIntent;
+    await offlineDb.outbox.add(
+      fresh(createdHere ? "CREATE" : op, merged, base, transactionDateIntent ?? previousIntent)
+    );
     return;
   }
 
@@ -276,9 +313,21 @@ export function updateTransactionLocally(ownerId: string, input: LocalTransactio
     const invalid = await validateTransaction(ownerId, input);
     if (invalid) throw new LocalMutationError(invalid);
 
+    const dateIntent: TransactionDateIntent =
+      isTransactionDateChange(existing.transaction_date, input.transactionDate)
+        ? "changed"
+        : "unchanged";
     const changes = { ...transactionColumns(input), updated_at: new Date().toISOString() };
     await offlineDb.transactions.update([ownerId, existing.id], changes);
-    await enqueue(ownerId, "transaction", existing.id, "UPDATE", changes, existing.updated_at ?? null);
+    await enqueue(
+      ownerId,
+      "transaction",
+      existing.id,
+      "UPDATE",
+      changes,
+      existing.updated_at ?? null,
+      dateIntent
+    );
   });
 }
 

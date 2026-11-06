@@ -2,6 +2,10 @@ import { validateBudgetAmount } from "@/lib/budget";
 import type { createClient } from "@/lib/supabase/server";
 import { countCategoryUsage, validateTransactionInput } from "@/lib/server/validation";
 import {
+  isAmbiguousLegacyTransactionDateUpdate,
+  normalizeTransactionDate,
+} from "@/lib/transactions";
+import {
   SYNC_BATCH_SIZE,
   type SyncBatchResponse,
   type SyncConflict,
@@ -93,6 +97,8 @@ function isOperationShape(op: SyncOperation) {
     (op.entity === "budget" ? op.entityId === op.ownerId : UUID.test(op.entityId)) &&
     !!op.payload &&
     typeof op.payload === "object" &&
+    (op.transactionDateIntent === undefined ||
+      ["unchanged", "changed"].includes(op.transactionDateIntent)) &&
     typeof op.editedAt === "string"
   );
 }
@@ -130,6 +136,17 @@ function pick(source: Row, fields: readonly string[]) {
 const done = (op: SyncOperation, extra: Partial<SyncOpResult> = {}): SyncOpResult => ({ opId: op.opId, status: "applied", ...extra });
 const already = (op: SyncOperation, serverUpdatedAt?: string | null): SyncOpResult => ({ opId: op.opId, status: "already-applied", serverUpdatedAt });
 const rejected = (op: SyncOperation, error: string): SyncOpResult => ({ opId: op.opId, status: "rejected", error });
+const reviewLegacyTransactionDate = (
+  op: SyncOperation,
+  serverTransactionDate: unknown
+): SyncOpResult => ({
+  opId: op.opId,
+  status: "rejected",
+  reviewReason: "legacy-transaction-date",
+  serverTransactionDate: String(serverTransactionDate ?? ""),
+  error:
+    "Review this transaction and save it again. Its older offline edit cannot prove whether the date changed.",
+});
 
 /** Rule/permission/data errors need the user; anything else is treated as temporary. */
 function fromDbError(op: SyncOperation, error: NonNullable<DbError>, messages: Record<string, string> = {}): SyncOpResult {
@@ -166,13 +183,14 @@ const TRANSACTION_SELECT = "id, user_id, account_id, category_id, type, amount, 
 function transactionColumns(source: Row) {
   const time = typeof source.transaction_time === "string" ? source.transaction_time.slice(0, 5) : "";
   const description = typeof source.description === "string" ? source.description.trim() : "";
+  const rawDate = String(source.transaction_date ?? "");
   return {
     account_id: String(source.account_id ?? ""),
     category_id: String(source.category_id ?? ""),
     type: String(source.type ?? ""),
     amount: Number(source.amount),
     description: description || null,
-    transaction_date: String(source.transaction_date ?? "").slice(0, 10),
+    transaction_date: normalizeTransactionDate(rawDate) ?? rawDate,
     transaction_time: time ? `${time}:00` : null,
   };
 }
@@ -236,15 +254,28 @@ async function applyTransaction(supabase: ServerClient, userId: string, op: Sync
   if (op.op === "UPDATE") {
     if (!row) return rejected(op, "This transaction no longer exists. It may have been deleted on another device.");
     const current = transactionColumns(row);
-    const next = transactionColumns({ ...row, ...pick(op.payload, TRANSACTION_FIELDS) });
+    const picked = pick(op.payload, TRANSACTION_FIELDS);
+    if (
+      op.transactionDateIntent === undefined &&
+      isAmbiguousLegacyTransactionDateUpdate(
+        row.transaction_date,
+        picked.transaction_date
+      )
+    ) {
+      return reviewLegacyTransactionDate(op, row.transaction_date);
+    }
+    if (op.transactionDateIntent === "unchanged") delete picked.transaction_date;
+    const next = transactionColumns({ ...row, ...picked });
     if (sameTransaction(current, next)) return already(op, (row.updated_at as string) ?? null);
     const lww = lastWriteWins(row.updated_at, op.baseUpdatedAt, editedAt);
     if (!lww.apply) return done(op, { conflict: lww.conflict, serverUpdatedAt: (row.updated_at as string) ?? null });
     const invalid = await validateTransactionColumns(supabase, userId, next);
     if (invalid) return rejected(op, invalid);
+    const changes: Row = { ...next, updated_at: editedAt };
+    if (current.transaction_date === next.transaction_date) delete changes.transaction_date;
     const update = await supabase
       .from("transactions")
-      .update({ ...next, updated_at: editedAt })
+      .update(changes)
       .eq("id", op.entityId)
       .eq("user_id", userId)
       .select("id")

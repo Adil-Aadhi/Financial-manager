@@ -20,6 +20,7 @@ import {
   type ReportRollupRow,
 } from "@/lib/reports";
 import type { SupportedCurrency } from "@/lib/supabase/profile";
+import { normalizeTransactionDate } from "@/lib/transactions";
 
 export function OfflineReportContent({
   ownerId,
@@ -55,7 +56,8 @@ export function OfflineReportContent({
 
     const groups = new Map<string, ReportRollupRow>();
     for (const transaction of transactions) {
-      const date = transaction.transaction_date.slice(0, 10);
+      const date = normalizeTransactionDate(transaction.transaction_date);
+      if (!date) continue;
       if (date < range.start || date > range.end) continue;
       const month = `${date.slice(0, 7)}-01`;
       const key = `${transaction.account_id}|${transaction.category_id}|${transaction.type}|${month}`;

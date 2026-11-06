@@ -5,6 +5,7 @@ import type {
   LocalTransaction,
   OutboxEntry,
 } from "./db";
+import { isAmbiguousLegacyTransactionDateUpdate } from "@/lib/transactions";
 
 export interface LocalSnapshotRows {
   accounts: LocalAccount[];
@@ -79,9 +80,21 @@ export function overlayOutbox(
       const base =
         transactions.get(entry.entityId) ?? previousTransactions.get(entry.entityId);
       if (base || entry.op === "CREATE") {
+        const payload = { ...entry.payload };
+        if (
+          entry.op === "UPDATE" &&
+          (entry.transactionDateIntent === "unchanged" ||
+            (entry.transactionDateIntent === undefined &&
+              isAmbiguousLegacyTransactionDateUpdate(
+                base?.transaction_date,
+                payload.transaction_date
+              )))
+        ) {
+          delete payload.transaction_date;
+        }
         transactions.set(entry.entityId, {
           ...(base ?? ({} as LocalTransaction)),
-          ...entry.payload,
+          ...payload,
           ownerId,
           id: entry.entityId,
           user_id: ownerId,

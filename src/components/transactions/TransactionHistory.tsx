@@ -27,12 +27,9 @@ import {
 type TransactionFilter = "all" | TransactionType;
 
 function localDateKey(offsetDays = 0) {
-  const date = new Date();
-  date.setDate(date.getDate() + offsetDays);
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+  return normalizeTransactionDate(
+    new Date(Date.now() + offsetDays * 86_400_000).toISOString()
+  )!;
 }
 
 function formatDayHeading(value: string) {
@@ -48,7 +45,7 @@ function formatDayHeading(value: string) {
     weekday: "short",
     day: "numeric",
     month: "short",
-    year: year === new Date().getFullYear() ? undefined : "numeric",
+    year: String(year) === localDateKey().slice(0, 4) ? undefined : "numeric",
     timeZone: "UTC",
   }).format(date);
 }
@@ -105,15 +102,18 @@ export function TransactionHistory({
           : true
       )
       .filter((transaction) => !categoryId || transaction.category_id === categoryId)
-      .filter((transaction) => !startDate || transaction.transaction_date >= startDate)
-      .filter((transaction) => !endDate || transaction.transaction_date <= endDate)
+      .filter((transaction) => {
+        const date = normalizeTransactionDate(transaction.transaction_date);
+        if (!date) return !startDate && !endDate;
+        return (!startDate || date >= startDate) && (!endDate || date <= endDate);
+      })
       .sort((a, b) => transactionSortValue(b).localeCompare(transactionSortValue(a)));
   }, [categoryId, endDate, filter, search, startDate, transactions]);
 
   const groups = useMemo(() => {
     const byDay = new Map<string, { items: TransactionRecord[]; total: number }>();
     for (const transaction of visibleTransactions) {
-      const key = normalizeTransactionDate(transaction.transaction_date);
+      const key = normalizeTransactionDate(transaction.transaction_date) ?? "";
       const group = byDay.get(key) ?? { items: [], total: 0 };
       const value = Number(transaction.amount) || 0;
       group.items.push(transaction);
