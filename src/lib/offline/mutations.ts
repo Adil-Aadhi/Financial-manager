@@ -20,6 +20,7 @@ import {
   type OutboxOperation,
 } from "@/lib/offline/db";
 import type { TransactionFormOptions, TransactionType } from "@/lib/transactions";
+import { canCoalesce } from "@/lib/offline/queuePolicy";
 
 /**
  * Local-first mutations (offline Phase 1).
@@ -157,8 +158,10 @@ async function enqueue(
     .where("[ownerId+entity+entityId]")
     .equals([ownerId, entity, entityId])
     .sortBy("seq");
-  // Entries Phase 2 has started on (syncing/failed) are never rewritten here.
-  const mergeable = existing.length > 0 && existing.every((entry) => entry.status === "pending");
+  // Once an entry has been attempted, the server may already have applied it even when the
+  // response never reached this device. Its opId and payload must stay immutable so a retry can
+  // be recognised as already applied; later intent is appended as a separate operation.
+  const mergeable = canCoalesce(existing);
 
   if (MOVABLE_ENTITIES.has(entity) && mergeable) {
     const createdHere = existing.some((entry) => entry.op === "CREATE");

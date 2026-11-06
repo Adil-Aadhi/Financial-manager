@@ -5,7 +5,9 @@ import { liveQuery, type Subscription } from "dexie";
 import { ensureOfflineBootstrap } from "@/lib/offline/bootstrap";
 import { createClient } from "@/lib/supabase/client";
 import { offlineDb } from "@/lib/offline/db";
-import { setActiveOwnerId } from "@/lib/offline/activeOwner";
+import { getActiveOwnerId, setActiveOwnerId } from "@/lib/offline/activeOwner";
+import { clearPrivateRouteCache } from "@/lib/offline/privacy";
+import { shouldIsolateOwner } from "@/lib/offline/signOutCoordinator";
 import { requestSync, startSyncEngine } from "@/lib/offline/sync";
 
 // Keep this in sync with public/sw.js. A new worker version gets one fresh route-warm
@@ -32,6 +34,7 @@ export function OfflineDataProvider({ children }: { children: React.ReactNode })
     const bootstrapJobs = new Map<string, Promise<void>>();
     const routeWarmJobs = new Map<string, Promise<void>>();
     const warmedRouteSignatures = new Set<string>();
+    let privateCacheReset: Promise<void> = Promise.resolve();
 
     const warmRoutesOnce = (userId: string, activeAccountIds: string[]) => {
       if (process.env.NODE_ENV !== "production" || !("serviceWorker" in navigator)) return;
@@ -88,11 +91,23 @@ export function OfflineDataProvider({ children }: { children: React.ReactNode })
     };
 
     const bootstrap = (userId: string) => {
+      const previousUserId = authenticatedUserId ?? getActiveOwnerId();
+      if (shouldIsolateOwner(previousUserId, userId)) {
+        // Never let a newly authenticated user inherit another owner's warmed pages or active
+        // IndexedDB selection. The old owner's rows remain partitioned and recoverable.
+        setActiveOwnerId(null);
+        accountRouteSubscription?.unsubscribe();
+        accountRouteSubscription = null;
+        watchedUserId = null;
+        warmedRouteSignatures.clear();
+        privateCacheReset = clearPrivateRouteCache();
+      }
       authenticatedUserId = userId;
       const current = bootstrapJobs.get(userId);
       if (current) return current;
 
       const job = new Promise<void>((resolve) => window.setTimeout(resolve, 0))
+        .then(() => privateCacheReset)
         .then(() => {
           if (cancelled || authenticatedUserId !== userId) return;
           return ensureOfflineBootstrap(userId);
@@ -134,7 +149,7 @@ export function OfflineDataProvider({ children }: { children: React.ReactNode })
         accountRouteSubscription = null;
         watchedUserId = null;
         warmedRouteSignatures.clear();
-        navigator.serviceWorker?.controller?.postMessage({ type: "CLEAR_PRIVATE_ROUTES" });
+        privateCacheReset = clearPrivateRouteCache();
       }
     });
 

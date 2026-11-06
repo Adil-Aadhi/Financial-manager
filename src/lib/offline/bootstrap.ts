@@ -2,6 +2,7 @@ import "client-only";
 
 import type { User } from "@supabase/supabase-js";
 import { offlineDb, type LocalSyncMeta, type LocalVerificationTotals } from "@/lib/offline/db";
+import { overlayOutbox } from "@/lib/offline/snapshotOverlay";
 import { createClient } from "@/lib/supabase/client";
 
 const PAGE_SIZE = 500;
@@ -229,10 +230,44 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
       offlineDb.outbox,
     ],
     async () => {
-      // Checked inside the same transaction as the overwrite, so a change saved on this
-      // device while the snapshot was downloading can never be replaced by it.
-      const kept = await keepLocalChanges(ownerId);
-      if (kept) return kept;
+      // Read both the previous rows and the current outbox inside the same transaction as the
+      // replacement. Changes saved while the snapshot downloaded are therefore replayed over
+      // it atomically instead of being overwritten.
+      const [previousAccounts, previousCategories, previousTransactions, previousBudget, outbox] =
+        await Promise.all([
+          offlineDb.accounts.where("ownerId").equals(ownerId).toArray(),
+          offlineDb.categories.where("ownerId").equals(ownerId).toArray(),
+          offlineDb.transactions.where("ownerId").equals(ownerId).toArray(),
+          offlineDb.monthlyBudgets.get(ownerId),
+          offlineDb.outbox.where("ownerId").equals(ownerId).sortBy("seq"),
+        ]);
+
+      const localRows = overlayOutbox(
+        ownerId,
+        {
+          accounts: snapshot.accounts.map((account) => ({
+            ownerId,
+            ...account,
+            deleted_at: account.deleted_at ?? null,
+          })),
+          categories: snapshot.categories.map((category) => ({ ownerId, ...category })),
+          transactions: snapshot.transactions.map((transaction) => ({
+            ownerId,
+            ...transaction,
+            transaction_time: transaction.transaction_time ?? null,
+          })),
+          budget: snapshot.budget.rows[0]
+            ? { ownerId, ...snapshot.budget.rows[0] }
+            : null,
+        },
+        {
+          accounts: previousAccounts,
+          categories: previousCategories,
+          transactions: previousTransactions,
+          budget: previousBudget ?? null,
+        },
+        outbox
+      );
 
       await Promise.all([
         offlineDb.accounts.where("ownerId").equals(ownerId).delete(),
@@ -247,29 +282,20 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
         ...snapshot.profile,
         default_currency: snapshot.profile.default_currency || "USD",
       });
-      await offlineDb.accounts.bulkPut(
-        snapshot.accounts.map((account) => ({ ownerId, ...account, deleted_at: account.deleted_at ?? null }))
-      );
-      await offlineDb.categories.bulkPut(
-        snapshot.categories.map((category) => ({ ownerId, ...category }))
-      );
-      await offlineDb.transactions.bulkPut(
-        snapshot.transactions.map((transaction) => ({
-          ownerId,
-          ...transaction,
-          transaction_time: transaction.transaction_time ?? null,
-        }))
-      );
-      if (snapshot.budget.rows[0]) {
-        await offlineDb.monthlyBudgets.put({ ownerId, ...snapshot.budget.rows[0] });
-      }
+      await offlineDb.accounts.bulkPut(localRows.accounts);
+      await offlineDb.categories.bulkPut(localRows.categories);
+      await offlineDb.transactions.bulkPut(localRows.transactions);
+      if (localRows.budget) await offlineDb.monthlyBudgets.put(localRows.budget);
 
       const [localAccounts, localTransactions] = await Promise.all([
         offlineDb.accounts.where("ownerId").equals(ownerId).toArray(),
         offlineDb.transactions.where("ownerId").equals(ownerId).toArray(),
       ]);
       const localTotals = totals(localAccounts, localTransactions);
-      const totalsMatch = totalsEqual(serverTotals, localTotals);
+      // With an outbox, local totals intentionally differ from Supabase. The snapshot was fully
+      // downloaded and the overlay completed in this same atomic transaction, so it remains a
+      // complete usable local copy.
+      const totalsMatch = outbox.length > 0 || totalsEqual(serverTotals, localTotals);
       if (!totalsMatch) throw new Error("IndexedDB verification did not match the Supabase snapshot.");
 
       const meta: LocalSyncMeta = {
@@ -286,24 +312,7 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
   );
 }
 
-/**
- * A snapshot replaces every local row for the owner. While the outbox holds changes that
- * Supabase hasn't received, that would erase them, so the refresh keeps the local copy
- * instead. Phase 2's sync engine empties the outbox first; refreshes then resume as before.
- */
-async function keepLocalChanges(ownerId: string): Promise<LocalSyncMeta | null> {
-  const unsynced = await offlineDb.outbox.where("ownerId").equals(ownerId).count();
-  if (unsynced === 0) return null;
-  const meta = await offlineDb.syncMeta.get(ownerId);
-  if (!meta) throw new Error("Unsynced changes exist without a local snapshot.");
-  return meta;
-}
-
 async function runBootstrap(expectedUserId: string) {
-  // Skip the download entirely while local changes are waiting; see keepLocalChanges().
-  const kept = await keepLocalChanges(expectedUserId);
-  if (kept) return kept;
-
   const supabase = createClient();
   const { data, error } = await supabase.auth.getUser();
   if (error || !data.user || data.user.id !== expectedUserId) {

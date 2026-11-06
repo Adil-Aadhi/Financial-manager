@@ -77,7 +77,9 @@ export function SyncReviewSheet({ ownerId, isOpen, onClose }: { ownerId: string;
             <h3 className="flex items-center gap-1.5 text-xs font-semibold text-danger">
               <AlertTriangle className="h-3.5 w-3.5" /> Couldn&apos;t sync ({failed.length})
             </h3>
-            <p className="text-xs text-fg-subtle">Changes after these wait, so nothing is applied out of order.</p>
+            <p className="text-xs text-fg-subtle">
+              Related changes wait behind these; independent records can continue syncing safely.
+            </p>
             <ul className="space-y-2">
               {failed.map((entry) => (
                 <li key={entry.seq} className="rounded-2xl border border-danger/25 bg-danger/8 p-3">

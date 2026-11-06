@@ -42,6 +42,7 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("message", (event) => {
   if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
   if (event.data?.type === "CLEAR_PRIVATE_ROUTES") {
+    const replyPort = event.ports?.[0];
     privateCacheGeneration += 1;
     const previousReset = privateCacheReset;
     const jobs = [...inFlightRouteCacheJobs.values()];
@@ -50,7 +51,8 @@ self.addEventListener("message", (event) => {
     privateCacheReset = Promise.allSettled([previousReset, ...jobs.map((job) => job.promise)])
       .then(() => caches.delete(PRIVATE_CACHE_VERSION))
       .then(() => undefined);
-    event.waitUntil(privateCacheReset);
+    const completed = privateCacheReset.finally(() => replyPort?.postMessage({ cleared: true }));
+    event.waitUntil(completed);
   }
   if (event.data?.type === "CACHE_ROUTES" && Array.isArray(event.data.routes)) {
     const generation = privateCacheGeneration;
