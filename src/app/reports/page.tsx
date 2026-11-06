@@ -1,12 +1,11 @@
 import { Suspense } from "react";
 import { Metadata } from "next";
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getAuthenticatedUserProfile } from "@/lib/supabase/profile";
 import type { SupportedCurrency } from "@/lib/supabase/profile";
 import { createClient } from "@/lib/supabase/server";
 import { getReportSource } from "@/lib/supabase/reports";
-import { TIME_ZONE_COOKIE, resolveTimeZone } from "@/lib/month";
+import { TRANSACTION_CALENDAR_TIME_ZONE } from "@/lib/month";
 import { buildReport, getReportRange } from "@/lib/reports";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
 import { OfflineReportContent } from "@/components/reports/OfflineReportContent";
@@ -53,10 +52,9 @@ async function ReportContent({
   searchParams: SearchParams;
 }) {
   const params = await searchParams;
-  const cookieStore = await cookies();
   const range = getReportRange(
     { range: first(params.range), from: first(params.from), to: first(params.to) },
-    resolveTimeZone(cookieStore.get(TIME_ZONE_COOKIE)?.value)
+    TRANSACTION_CALENDAR_TIME_ZONE
   );
 
   let source;

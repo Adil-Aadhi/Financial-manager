@@ -2,6 +2,8 @@
 
 export type SyncEntity = "transaction" | "account" | "category" | "budget";
 export type SyncOp = "CREATE" | "UPDATE" | "DELETE";
+export type TransactionDateIntent = "unchanged" | "changed";
+export type SyncReviewReason = "legacy-transaction-date";
 
 /** One outbox entry as sent to the server. */
 export interface SyncOperation {
@@ -12,6 +14,8 @@ export interface SyncOperation {
   entityId: string;
   op: SyncOp;
   payload: Record<string, unknown>;
+  /** Present on transaction updates created by date-aware clients. */
+  transactionDateIntent?: TransactionDateIntent;
   /** Server updated_at the device last saw before editing (null for records created offline). */
   baseUpdatedAt: string | null;
   /** When the user last made this change on the device (outbox entry updatedAt). */
@@ -37,6 +41,10 @@ export interface SyncOpResult {
   opId: string;
   status: SyncResultStatus;
   error?: string;
+  /** A durable user review is required before this operation can be retried safely. */
+  reviewReason?: SyncReviewReason;
+  /** Current server value used to restore the local date while an old edit is reviewed. */
+  serverTransactionDate?: string;
   conflict?: SyncConflict;
   /** The record's updated_at on the server after this result, when it has one. */
   serverUpdatedAt?: string | null;

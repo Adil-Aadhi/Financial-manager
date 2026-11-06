@@ -1,6 +1,7 @@
 import "client-only";
 
 import Dexie, { type EntityTable, type Table } from "dexie";
+import type { SyncReviewReason, TransactionDateIntent } from "@/lib/sync/types";
 
 export interface LocalProfile {
   ownerId: string;
@@ -97,6 +98,10 @@ export interface OutboxEntry {
   op: OutboxOperation;
   /** Server column values to write (CREATE/UPDATE) or the identifying fields (DELETE). */
   payload: Record<string, unknown>;
+  /** Date-aware clients record whether the user changed the transaction date. */
+  transactionDateIntent?: TransactionDateIntent;
+  /** Set after the server identifies an old date value that requires explicit review. */
+  reviewReason?: SyncReviewReason;
   /** The record's updated_at before this device first changed it (for conflict checks later). */
   baseUpdatedAt: string | null;
   createdAt: string;

@@ -4,6 +4,7 @@ import type { User } from "@supabase/supabase-js";
 import { offlineDb, type LocalSyncMeta, type LocalVerificationTotals } from "@/lib/offline/db";
 import { overlayOutbox } from "@/lib/offline/snapshotOverlay";
 import { createClient } from "@/lib/supabase/client";
+import { normalizeTransactionDate } from "@/lib/transactions";
 
 const PAGE_SIZE = 500;
 const BOOTSTRAP_FRESH_MS = 60_000;
@@ -284,7 +285,14 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
       });
       await offlineDb.accounts.bulkPut(localRows.accounts);
       await offlineDb.categories.bulkPut(localRows.categories);
-      await offlineDb.transactions.bulkPut(localRows.transactions);
+      await offlineDb.transactions.bulkPut(
+        localRows.transactions.map((transaction) => ({
+          ...transaction,
+          transaction_date:
+            normalizeTransactionDate(transaction.transaction_date) ??
+            transaction.transaction_date,
+        }))
+      );
       if (localRows.budget) await offlineDb.monthlyBudgets.put(localRows.budget);
 
       const [localAccounts, localTransactions] = await Promise.all([

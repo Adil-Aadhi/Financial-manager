@@ -24,6 +24,7 @@ import { useOfflineRefresh } from "@/lib/offline/useOfflineRefresh";
 import { useLocalContentMark } from "@/lib/perf";
 import type { MonthRange } from "@/lib/month";
 import type { SupportedCurrency } from "@/lib/supabase/profile";
+import { normalizeTransactionDate } from "@/lib/transactions";
 
 export interface HomeAccount {
   id: string;
@@ -96,7 +97,10 @@ export function OfflineHomeDashboard({
     let otherCurrencyCount = 0;
 
     for (const transaction of transactions) {
-      if (transaction.type !== "expense" || !transaction.transaction_date.startsWith(month.prefix)) continue;
+      if (
+        transaction.type !== "expense" ||
+        !normalizeTransactionDate(transaction.transaction_date)?.startsWith(month.prefix)
+      ) continue;
       const accountCurrency = accountById.get(transaction.account_id)?.currency || localCurrency;
       if (accountCurrency === localCurrency) spent += Number(transaction.amount) || 0;
       else otherCurrencyCount += 1;
@@ -120,7 +124,9 @@ export function OfflineHomeDashboard({
           type: transaction.type,
           amount: transaction.amount,
           description: transaction.description,
-          transaction_date: transaction.transaction_date,
+          transaction_date:
+            normalizeTransactionDate(transaction.transaction_date) ??
+            transaction.transaction_date,
           created_at: transaction.created_at,
           category: category ? { name: category.name, icon: category.icon } : null,
         };
@@ -284,7 +290,7 @@ function calculateDashboard(snapshot: HomeSnapshot, currency: SupportedCurrency,
     if ((accountById.get(transaction.account_id)?.currency || currency) !== currency) continue;
     if (transaction.type === "income") balance += amount;
     if (transaction.type === "expense") balance -= amount;
-    if (!transaction.transaction_date.startsWith(monthPrefix)) continue;
+    if (!normalizeTransactionDate(transaction.transaction_date)?.startsWith(monthPrefix)) continue;
     if (transaction.type === "income") monthIncome += amount;
     if (transaction.type === "expense") {
       monthExpense += amount;
@@ -296,8 +302,8 @@ function calculateDashboard(snapshot: HomeSnapshot, currency: SupportedCurrency,
   }
   const recent = [...transactions]
     .sort((a, b) =>
-      `${b.transaction_date}|${b.created_at}`.localeCompare(
-        `${a.transaction_date}|${a.created_at}`
+      `${normalizeTransactionDate(b.transaction_date) ?? ""}|${b.created_at}`.localeCompare(
+        `${normalizeTransactionDate(a.transaction_date) ?? ""}|${a.created_at}`
       )
     )
     .slice(0, 5);
@@ -316,7 +322,9 @@ function calculateDashboard(snapshot: HomeSnapshot, currency: SupportedCurrency,
 }
 
 function formatShortDate(value: string) {
-  const [year, month, day] = value.slice(0, 10).split("-").map(Number);
+  const normalized = normalizeTransactionDate(value);
+  if (!normalized) return value;
+  const [year, month, day] = normalized.split("-").map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", timeZone: "UTC" }).format(date);

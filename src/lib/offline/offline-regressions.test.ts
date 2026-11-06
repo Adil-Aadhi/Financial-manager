@@ -129,6 +129,7 @@ function wire(entry: OutboxEntry): SyncOperation {
     entityId: entry.entityId,
     op: entry.op,
     payload: entry.payload,
+    transactionDateIntent: entry.transactionDateIntent,
     baseUpdatedAt: entry.baseUpdatedAt,
     editedAt: entry.updatedAt,
   };
@@ -349,5 +350,205 @@ describe("failed-operation isolation and refresh overlay", () => {
     const update = { ...failedAccount, op: "UPDATE" as const, payload: { name: "Phone value", opening_balance: 20 } };
     const overlaid = overlayOutbox(ownerId, server, previous, [update]);
     expect(overlaid.accounts[0]).toMatchObject({ name: "Phone value", opening_balance: 20 });
+  });
+});
+
+describe("legacy transaction-date outbox compatibility", () => {
+  const transactionId = "44444444-4444-4444-8444-444444444444";
+  const updatedAt = "2025-04-02T10:00:00.000Z";
+  const rawAprilFirst = "2025-03-31T18:30:00+00:00";
+
+  function transactionRow(transactionDate = rawAprilFirst): Row {
+    return {
+      id: transactionId,
+      user_id: ownerId,
+      account_id: accountId,
+      category_id: categoryId,
+      type: "expense",
+      amount: 100,
+      description: "Original",
+      transaction_date: transactionDate,
+      transaction_time: "10:00:00",
+      created_at: "2025-04-01T10:00:00.000Z",
+      updated_at: updatedAt,
+    };
+  }
+
+  function updateOperation(
+    overrides: Partial<SyncOperation> = {}
+  ): SyncOperation {
+    return {
+      opId: "legacy-update",
+      seq: 1,
+      ownerId,
+      entity: "transaction",
+      entityId: transactionId,
+      op: "UPDATE",
+      payload: {
+        account_id: accountId,
+        category_id: categoryId,
+        type: "expense",
+        amount: 125,
+        description: "Edited offline",
+        transaction_date: "2025-03-31",
+        transaction_time: "10:00:00",
+      },
+      baseUpdatedAt: updatedAt,
+      editedAt: "2025-04-03T10:00:00.000Z",
+      ...overrides,
+    };
+  }
+
+  it("keeps the corrected April 1 date during snapshot overlay", () => {
+    const serverTransaction = {
+      ownerId,
+      ...transactionRow(),
+    } as LocalSnapshotRows["transactions"][number];
+    const legacy: OutboxEntry = {
+      ...updateOperation(),
+      createdAt: "2025-04-03T10:00:00.000Z",
+      updatedAt: "2025-04-03T10:00:00.000Z",
+      status: "pending",
+      attempts: 0,
+      error: null,
+    };
+    const overlaid = overlayOutbox(
+      ownerId,
+      { accounts: [], categories: [], transactions: [serverTransaction], budget: null },
+      { accounts: [], categories: [], transactions: [], budget: null },
+      [legacy]
+    );
+
+    expect(overlaid.transactions[0]).toMatchObject({
+      amount: 125,
+      description: "Edited offline",
+      transaction_date: rawAprilFirst,
+    });
+  });
+
+  it("requires review before an ambiguous legacy update writes anything", async () => {
+    const server = seedServer();
+    server.rows("transactions").set(transactionId, transactionRow());
+
+    const response = await runSyncBatch(
+      server as never,
+      ownerId,
+      [updateOperation()],
+      new Date("2025-04-04T00:00:00.000Z")
+    );
+
+    expect(response.results[0]).toMatchObject({
+      status: "rejected",
+      reviewReason: "legacy-transaction-date",
+      serverTransactionDate: rawAprilFirst,
+    });
+    expect(server.rows("transactions").get(transactionId)).toMatchObject({
+      amount: 100,
+      description: "Original",
+      transaction_date: rawAprilFirst,
+    });
+  });
+
+  it("preserves the raw timestamp on unchanged-date updates and retries", async () => {
+    const server = seedServer();
+    server.rows("transactions").set(transactionId, transactionRow());
+    const operation = updateOperation({
+      opId: "date-aware-update",
+      transactionDateIntent: "unchanged",
+    });
+
+    const first = await runSyncBatch(
+      server as never,
+      ownerId,
+      [operation],
+      new Date("2025-04-04T00:00:00.000Z")
+    );
+    const retry = await runSyncBatch(
+      server as never,
+      ownerId,
+      [operation],
+      new Date("2025-04-04T00:00:00.000Z")
+    );
+
+    expect(first.results[0].status).toBe("applied");
+    expect(retry.results[0].status).toBe("already-applied");
+    expect(server.rows("transactions").get(transactionId)).toMatchObject({
+      amount: 125,
+      transaction_date: rawAprilFirst,
+    });
+  });
+
+  it("applies and safely retries an intentional date change", async () => {
+    const server = seedServer();
+    server.rows("transactions").set(transactionId, transactionRow());
+    const operation = updateOperation({
+      opId: "intentional-date-update",
+      transactionDateIntent: "changed",
+      payload: {
+        ...updateOperation().payload,
+        transaction_date: "2025-04-02",
+      },
+    });
+
+    await runSyncBatch(
+      server as never,
+      ownerId,
+      [operation],
+      new Date("2025-04-04T00:00:00.000Z")
+    );
+    const retry = await runSyncBatch(
+      server as never,
+      ownerId,
+      [operation],
+      new Date("2025-04-04T00:00:00.000Z")
+    );
+
+    expect(retry.results[0].status).toBe("already-applied");
+    expect(server.rows("transactions").get(transactionId)?.transaction_date).toBe(
+      "2025-04-02"
+    );
+  });
+
+  it("replaces a review-required entry only after the transaction is saved again", async () => {
+    await offlineDb.transactions.put({
+      ownerId,
+      ...(transactionRow("2025-04-01") as Omit<
+        LocalSnapshotRows["transactions"][number],
+        "ownerId"
+      >),
+    });
+    await offlineDb.outbox.add({
+      ...updateOperation(),
+      createdAt: "2025-04-03T10:00:00.000Z",
+      updatedAt: "2025-04-03T10:00:00.000Z",
+      status: "failed",
+      attempts: 1,
+      error: "Review required",
+      reviewReason: "legacy-transaction-date",
+    });
+
+    await updateTransactionLocally(ownerId, {
+      transactionId,
+      type: "expense",
+      amount: 125,
+      accountId,
+      categoryId,
+      transactionDate: "2025-04-01",
+      transactionTime: "10:00",
+      remark: "Edited offline",
+    });
+
+    const queued = await offlineDb.outbox.toArray();
+    expect(queued).toHaveLength(1);
+    expect(queued[0]).not.toHaveProperty("reviewReason");
+    expect(queued[0]).toMatchObject({
+      status: "pending",
+      transactionDateIntent: "unchanged",
+      payload: {
+        amount: 125,
+        description: "Edited offline",
+        transaction_date: "2025-04-01",
+      },
+    });
   });
 });

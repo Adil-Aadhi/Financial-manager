@@ -5,6 +5,7 @@ import type {
   ReportRange,
   ReportRollupRow,
 } from "@/lib/reports";
+import { normalizeTransactionDate, transactionDateRangeBounds } from "@/lib/transactions";
 
 type ServerClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -51,21 +52,25 @@ async function fallbackRollup(
   range: Pick<ReportRange, "start" | "end">
 ): Promise<ReportRollupRow[]> {
   const groups = new Map<string, ReportRollupRow>();
+  const bounds = transactionDateRangeBounds(range.start, range.end);
+  if (!bounds) throw new Error("Invalid report date range.");
 
   for (let from = 0; from < FALLBACK_MAX_ROWS; from += FALLBACK_PAGE_SIZE) {
     const { data, error } = await supabase
       .from("transactions")
       .select("account_id, category_id, type, amount, transaction_date")
       .eq("user_id", userId)
-      .gte("transaction_date", range.start)
-      .lte("transaction_date", `${range.end}T23:59:59.999`)
+      .gte("transaction_date", bounds.startInclusive)
+      .lt("transaction_date", bounds.endExclusive)
       .order("id")
       .range(from, from + FALLBACK_PAGE_SIZE - 1);
 
     if (error) throw new Error(error.message);
 
     for (const row of data ?? []) {
-      const month = `${String(row.transaction_date).slice(0, 7)}-01`;
+      const date = normalizeTransactionDate(String(row.transaction_date));
+      if (!date) continue;
+      const month = `${date.slice(0, 7)}-01`;
       const key = `${row.account_id}|${row.category_id}|${row.type}|${month}`;
       const group = groups.get(key) ?? {
         account_id: String(row.account_id),

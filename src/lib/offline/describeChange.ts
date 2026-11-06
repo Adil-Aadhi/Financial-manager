@@ -1,6 +1,7 @@
 import "client-only";
 
 import { offlineDb, type OutboxEntry } from "@/lib/offline/db";
+import { normalizeTransactionDate } from "@/lib/transactions";
 
 function amountText(value: unknown) {
   const amount = Number(value);
@@ -10,8 +11,8 @@ function amountText(value: unknown) {
 }
 
 function dateText(value: unknown) {
-  const date = typeof value === "string" ? value.slice(0, 10) : "";
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return "";
+  const date = typeof value === "string" ? normalizeTransactionDate(value) : "";
+  if (!date) return "";
   const [year, month, day] = date.split("-").map(Number);
   return new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", timeZone: "UTC" }).format(
     new Date(Date.UTC(year, month - 1, day))

@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import {
   OfflineHomeDashboard,
@@ -7,10 +6,11 @@ import {
   type HomeTransaction,
 } from "@/components/home/OfflineHomeDashboard";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
-import { TIME_ZONE_COOKIE, getMonthRange, resolveTimeZone } from "@/lib/month";
+import { getTransactionMonthRange } from "@/lib/month";
 import { getMonthlyBudgetOverview } from "@/lib/supabase/budget";
 import { getAuthenticatedUserProfile } from "@/lib/supabase/profile";
 import { createClient } from "@/lib/supabase/server";
+import { normalizeTransactionDate } from "@/lib/transactions";
 
 export const instant = false;
 
@@ -24,8 +24,7 @@ export default async function HomePage() {
   if (!user || !profile) redirect("/login");
 
   const name = profile.full_name || user.email?.split("@")[0] || "there";
-  const cookieStore = await cookies();
-  const month = getMonthRange(resolveTimeZone(cookieStore.get(TIME_ZONE_COOKIE)?.value));
+  const month = getTransactionMonthRange();
   const supabase = await createClient();
 
   const [accountsResult, transactionsResult, budget] = await Promise.all([
@@ -83,7 +82,9 @@ export default async function HomePage() {
       type: transaction.type,
       amount: transaction.amount,
       description: transaction.description,
-      transaction_date: transaction.transaction_date,
+      transaction_date:
+        normalizeTransactionDate(transaction.transaction_date) ??
+        transaction.transaction_date,
       created_at: transaction.created_at,
       category: category ? { name: category.name, icon: category.icon } : null,
     };

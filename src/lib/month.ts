@@ -1,12 +1,16 @@
+import { TRANSACTION_DATE_TIME_ZONE } from "@/lib/transactions";
+
 /** Cookie the root layout writes with the browser's IANA time zone. */
 export const TIME_ZONE_COOKIE = "ft-tz";
 
 /** Used before the browser has reported its time zone (first visit). */
-export const DEFAULT_TIME_ZONE = "Asia/Kolkata";
+export const DEFAULT_TIME_ZONE = TRANSACTION_DATE_TIME_ZONE;
+/** Transaction dates and financial reporting always use India's calendar. */
+export const TRANSACTION_CALENDAR_TIME_ZONE = TRANSACTION_DATE_TIME_ZONE;
 
 /**
- * Runs in <head>: stores the device time zone so server pages can use the
- * user's local calendar month. Tiny and dependency-free.
+ * Runs in <head>: stores the device time zone for non-transaction local-time
+ * features. Financial months use TRANSACTION_CALENDAR_TIME_ZONE.
  */
 export const timeZoneCookieScript = `(function(){try{var z=Intl.DateTimeFormat().resolvedOptions().timeZone;if(z&&document.cookie.indexOf("${TIME_ZONE_COOKIE}="+encodeURIComponent(z))<0){document.cookie="${TIME_ZONE_COOKIE}="+encodeURIComponent(z)+";path=/;max-age=31536000;samesite=lax"}}catch(e){}})()`;
 
@@ -54,4 +58,8 @@ export function getMonthRange(timeZone: string, now = new Date()): MonthRange {
       new Date(Date.UTC(year, month - 1, 1))
     ),
   };
+}
+
+export function getTransactionMonthRange(now = new Date()) {
+  return getMonthRange(TRANSACTION_CALENDAR_TIME_ZONE, now);
 }
