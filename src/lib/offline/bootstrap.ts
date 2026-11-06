@@ -100,6 +100,30 @@ interface BudgetRow {
   updated_at?: string | null;
 }
 
+interface DailyLimitRow {
+  id: string;
+  user_id: string;
+  effective_date: string;
+  amount: number | string;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+interface DailyExpenseRow {
+  id: string;
+  user_id: string;
+  expense_date: string;
+  amount: number | string;
+  description: string;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+/** Daily Budget Tracker columns kept on the device (see the account-columns note above). */
+export const DAILY_LIMIT_SNAPSHOT_COLUMNS = "id, user_id, effective_date, amount, created_at, updated_at";
+export const DAILY_EXPENSE_SNAPSHOT_COLUMNS =
+  "id, user_id, expense_date, amount, description, created_at, updated_at";
+
 async function fetchEveryPage<T>(
   label: string,
   fetchPage: (from: number, to: number) => PromiseLike<PageResult<T>>
@@ -208,11 +232,49 @@ async function downloadSnapshot(user: User) {
     }
   );
 
-  const [profileResult, accounts, categories, budget] = await Promise.all([
+  // Daily Budget Tracker. Before its migration runs the tables don't exist: the feature is
+  // then reported unavailable and everything else downloads as before.
+  const isMissingDailyTable = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    return (
+      [...MISSING_OBJECT_CODES].some((code) => message.includes(code)) ||
+      message.includes("daily_budget_limits") ||
+      message.includes("daily_budget_expenses")
+    );
+  };
+  const dailyBudgetPromise = Promise.all([
+    fetchEveryPage<DailyLimitRow>("Daily budget limits", (from, to) =>
+      supabase
+        .from("daily_budget_limits")
+        .select(DAILY_LIMIT_SNAPSHOT_COLUMNS)
+        .eq("user_id", user.id)
+        .order("id")
+        .range(from, to)
+    ),
+    fetchEveryPage<DailyExpenseRow>("Daily budget expenses", (from, to) =>
+      supabase
+        .from("daily_budget_expenses")
+        .select(DAILY_EXPENSE_SNAPSHOT_COLUMNS)
+        .eq("user_id", user.id)
+        .order("id")
+        .range(from, to)
+    ),
+  ]).then(
+    ([limits, expenses]) => ({ limits, expenses, available: true }),
+    (error: unknown) => {
+      if (isMissingDailyTable(error)) {
+        return { limits: [] as DailyLimitRow[], expenses: [] as DailyExpenseRow[], available: false };
+      }
+      throw error;
+    }
+  );
+
+  const [profileResult, accounts, categories, budget, dailyBudget] = await Promise.all([
     profilePromise,
     accountsPromise,
     categoriesPromise,
     budgetPromise,
+    dailyBudgetPromise,
   ]);
   if (profileResult.error) throw new Error(`Profile: ${profileResult.error.message}`);
 
@@ -241,7 +303,7 @@ async function downloadSnapshot(user: User) {
     default_currency: "USD",
   };
 
-  return { profile, accounts, categories, transactions, budget };
+  return { profile, accounts, categories, transactions, budget, dailyBudget };
 }
 
 async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof downloadSnapshot>>) {
@@ -256,6 +318,8 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
       offlineDb.categories,
       offlineDb.transactions,
       offlineDb.monthlyBudgets,
+      offlineDb.dailyBudgetLimits,
+      offlineDb.dailyBudgetExpenses,
       offlineDb.syncMeta,
       offlineDb.outbox,
     ],
@@ -263,14 +327,23 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
       // Read both the previous rows and the current outbox inside the same transaction as the
       // replacement. Changes saved while the snapshot downloaded are therefore replayed over
       // it atomically instead of being overwritten.
-      const [previousAccounts, previousCategories, previousTransactions, previousBudget, outbox] =
-        await Promise.all([
-          offlineDb.accounts.where("ownerId").equals(ownerId).toArray(),
-          offlineDb.categories.where("ownerId").equals(ownerId).toArray(),
-          offlineDb.transactions.where("ownerId").equals(ownerId).toArray(),
-          offlineDb.monthlyBudgets.get(ownerId),
-          offlineDb.outbox.where("ownerId").equals(ownerId).sortBy("seq"),
-        ]);
+      const [
+        previousAccounts,
+        previousCategories,
+        previousTransactions,
+        previousBudget,
+        previousDailyLimits,
+        previousDailyExpenses,
+        outbox,
+      ] = await Promise.all([
+        offlineDb.accounts.where("ownerId").equals(ownerId).toArray(),
+        offlineDb.categories.where("ownerId").equals(ownerId).toArray(),
+        offlineDb.transactions.where("ownerId").equals(ownerId).toArray(),
+        offlineDb.monthlyBudgets.get(ownerId),
+        offlineDb.dailyBudgetLimits.where("ownerId").equals(ownerId).toArray(),
+        offlineDb.dailyBudgetExpenses.where("ownerId").equals(ownerId).toArray(),
+        offlineDb.outbox.where("ownerId").equals(ownerId).sortBy("seq"),
+      ]);
 
       const localRows = overlayOutbox(
         ownerId,
@@ -291,12 +364,19 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
           budget: snapshot.budget.rows[0]
             ? { ownerId, ...snapshot.budget.rows[0] }
             : null,
+          dailyLimits: snapshot.dailyBudget.limits.map(({ id: _id, ...limit }) => {
+            void _id;
+            return { ownerId, ...limit };
+          }),
+          dailyExpenses: snapshot.dailyBudget.expenses.map((expense) => ({ ownerId, ...expense })),
         },
         {
           accounts: previousAccounts,
           categories: previousCategories,
           transactions: previousTransactions,
           budget: previousBudget ?? null,
+          dailyLimits: previousDailyLimits,
+          dailyExpenses: previousDailyExpenses,
         },
         outbox
       );
@@ -305,6 +385,8 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
         offlineDb.accounts.where("ownerId").equals(ownerId).delete(),
         offlineDb.categories.where("ownerId").equals(ownerId).delete(),
         offlineDb.transactions.where("ownerId").equals(ownerId).delete(),
+        offlineDb.dailyBudgetLimits.where("ownerId").equals(ownerId).delete(),
+        offlineDb.dailyBudgetExpenses.where("ownerId").equals(ownerId).delete(),
       ]);
       await offlineDb.profiles.delete(ownerId);
       await offlineDb.monthlyBudgets.delete(ownerId);
@@ -325,6 +407,8 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
         }))
       );
       if (localRows.budget) await offlineDb.monthlyBudgets.put(localRows.budget);
+      await offlineDb.dailyBudgetLimits.bulkPut(localRows.dailyLimits ?? []);
+      await offlineDb.dailyBudgetExpenses.bulkPut(localRows.dailyExpenses ?? []);
 
       const [localAccounts, localTransactions] = await Promise.all([
         offlineDb.accounts.where("ownerId").equals(ownerId).toArray(),
@@ -341,6 +425,7 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
         ownerId,
         completedAt: new Date().toISOString(),
         budgetAvailable: snapshot.budget.available,
+        dailyBudgetAvailable: snapshot.dailyBudget.available,
         server: serverTotals,
         local: localTotals,
         totalsMatch,

@@ -68,6 +68,30 @@ export interface LocalMonthlyBudget {
   updated_at?: string | null;
 }
 
+/**
+ * Daily Budget Tracker (independent of accounts and transactions). One limit per effective
+ * date, keyed by that date, so a calendar day can never have two allowances.
+ */
+export interface LocalDailyBudgetLimit {
+  ownerId: string;
+  effective_date: string;
+  user_id: string;
+  amount: number | string;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface LocalDailyBudgetExpense {
+  ownerId: string;
+  id: string;
+  user_id: string;
+  expense_date: string;
+  amount: number | string;
+  description: string;
+  created_at: string;
+  updated_at?: string | null;
+}
+
 export interface LocalVerificationTotals {
   accounts: number;
   transactions: number;
@@ -79,12 +103,23 @@ export interface LocalSyncMeta {
   ownerId: string;
   completedAt: string;
   budgetAvailable: boolean;
+  /**
+   * false until the daily-budget migration is applied. Missing on metas written before the
+   * feature existed; read with `=== true`, and the next refresh fills it in.
+   */
+  dailyBudgetAvailable?: boolean;
   server: LocalVerificationTotals;
   local: LocalVerificationTotals;
   totalsMatch: boolean;
 }
 
-export type OutboxEntity = "transaction" | "account" | "category" | "budget";
+export type OutboxEntity =
+  | "transaction"
+  | "account"
+  | "category"
+  | "budget"
+  | "daily_expense"
+  | "daily_limit";
 export type OutboxOperation = "CREATE" | "UPDATE" | "DELETE";
 /** Phase 1 only writes "pending". Phase 2's sync engine moves ops through the others. */
 export type OutboxStatus = "pending" | "syncing" | "failed";
@@ -144,6 +179,8 @@ class FinanceOfflineDatabase extends Dexie {
   categories!: Table<LocalCategory, [string, string]>;
   transactions!: Table<LocalTransaction, [string, string]>;
   monthlyBudgets!: EntityTable<LocalMonthlyBudget, "ownerId">;
+  dailyBudgetLimits!: Table<LocalDailyBudgetLimit, [string, string]>;
+  dailyBudgetExpenses!: Table<LocalDailyBudgetExpense, [string, string]>;
   syncMeta!: EntityTable<LocalSyncMeta, "ownerId">;
   outbox!: EntityTable<OutboxEntry, "seq">;
   syncConflicts!: EntityTable<SyncConflictRecord, "id">;
@@ -166,6 +203,11 @@ class FinanceOfflineDatabase extends Dexie {
     // v3 only adds the conflict log; the outbox and all other tables are unchanged.
     this.version(3).stores({
       syncConflicts: "++id, ownerId, opId",
+    });
+    // v4 only adds the Daily Budget Tracker tables; every existing table and row is unchanged.
+    this.version(4).stores({
+      dailyBudgetLimits: "&[ownerId+effective_date], ownerId",
+      dailyBudgetExpenses: "&[ownerId+id], ownerId, [ownerId+expense_date]",
     });
   }
 }

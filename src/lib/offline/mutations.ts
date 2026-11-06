@@ -7,6 +7,14 @@ import {
   type AccountGroup,
 } from "@/lib/accounts";
 import { validateBudgetAmount } from "@/lib/budget";
+import {
+  dailyBudgetToday,
+  roundAmount,
+  validateDailyExpenseInput,
+  validateDailyLimitInput,
+  type DailyExpenseInput,
+  type DailyLimitInput,
+} from "@/lib/dailyBudget";
 import { isCategoryType } from "@/lib/categories";
 import {
   ACCOUNT_RESTORE_WINDOW_MS,
@@ -55,9 +63,15 @@ export interface MutationOutcome {
 }
 
 const TEN_DAYS_IN_MS = ACCOUNT_RESTORE_WINDOW_MS;
-/** Transactions and the budget are never referenced by other records, so their queued
- * operations can be merged and moved to the end of the queue without breaking ordering. */
-const MOVABLE_ENTITIES = new Set<OutboxEntity>(["transaction", "budget"]);
+/** Transactions, the budget and daily-budget records are never referenced by other records, so
+ * their queued operations can be merged and moved to the end of the queue without breaking
+ * ordering. */
+const MOVABLE_ENTITIES = new Set<OutboxEntity>([
+  "transaction",
+  "budget",
+  "daily_expense",
+  "daily_limit",
+]);
 
 function newId() {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
@@ -240,6 +254,8 @@ const WRITE_TABLES = [
   offlineDb.categories,
   offlineDb.transactions,
   offlineDb.monthlyBudgets,
+  offlineDb.dailyBudgetLimits,
+  offlineDb.dailyBudgetExpenses,
   offlineDb.syncMeta,
   offlineDb.outbox,
 ];
@@ -622,5 +638,122 @@ export function deleteBudgetLocally(ownerId: string) {
     if (!existing) throw new LocalMutationError("There is no budget to remove.");
     await offlineDb.monthlyBudgets.delete(ownerId);
     await enqueue(ownerId, "budget", ownerId, "DELETE", { user_id: ownerId }, existing.updated_at ?? null);
+  });
+}
+
+/* ---------------------------------------------------------------- daily budget tracker */
+// Independent of accounts and transactions: these only touch the two daily-budget tables.
+
+async function requireDailyBudget(ownerId: string) {
+  await requireLocalSnapshot(ownerId);
+  const meta = await offlineDb.syncMeta.get(ownerId);
+  if (meta?.dailyBudgetAvailable !== true) {
+    throw new LocalMutationError(
+      "The daily budget isn't ready on this device yet. Connect to the internet once, then try again."
+    );
+  }
+}
+
+function dailyExpenseColumns(input: DailyExpenseInput) {
+  return {
+    expense_date: input.expenseDate,
+    amount: roundAmount(input.amount),
+    description: input.description.trim(),
+  };
+}
+
+export interface LocalDailyExpenseInput extends DailyExpenseInput {
+  /** Client-generated id, reused on retry so the same entry can never be added twice. */
+  id?: string;
+}
+
+export function addDailyExpenseLocally(ownerId: string, input: LocalDailyExpenseInput) {
+  return inLocalTransaction(async () => {
+    await requireDailyBudget(ownerId);
+    const invalid = validateDailyExpenseInput(input, dailyBudgetToday());
+    if (invalid) throw new LocalMutationError(invalid);
+    const id = input.id ?? newId();
+    if (await offlineDb.dailyBudgetExpenses.get([ownerId, id])) return; // already saved
+    const now = new Date().toISOString();
+    const row = { ownerId, id, user_id: ownerId, ...dailyExpenseColumns(input), created_at: now, updated_at: now };
+    await offlineDb.dailyBudgetExpenses.add(row);
+    const { ownerId: _owner, ...payload } = row;
+    void _owner;
+    await enqueue(ownerId, "daily_expense", id, "CREATE", payload, null);
+  });
+}
+
+export function updateDailyExpenseLocally(
+  ownerId: string,
+  input: DailyExpenseInput & { expenseId: string }
+) {
+  return inLocalTransaction(async () => {
+    await requireDailyBudget(ownerId);
+    const existing = await offlineDb.dailyBudgetExpenses.get([ownerId, input.expenseId]);
+    if (!existing) throw new LocalMutationError("This expense no longer exists.");
+    const invalid = validateDailyExpenseInput(input, dailyBudgetToday());
+    if (invalid) throw new LocalMutationError(invalid);
+    const changes = { ...dailyExpenseColumns(input), updated_at: new Date().toISOString() };
+    await offlineDb.dailyBudgetExpenses.update([ownerId, existing.id], changes);
+    await enqueue(ownerId, "daily_expense", existing.id, "UPDATE", changes, existing.updated_at ?? null);
+  });
+}
+
+export function deleteDailyExpenseLocally(ownerId: string, expenseId: string) {
+  return inLocalTransaction(async () => {
+    await requireDailyBudget(ownerId);
+    const existing = await offlineDb.dailyBudgetExpenses.get([ownerId, expenseId]);
+    if (!existing) throw new LocalMutationError("This expense no longer exists.");
+    await offlineDb.dailyBudgetExpenses.delete([ownerId, expenseId]);
+    await enqueue(ownerId, "daily_expense", expenseId, "DELETE", { id: expenseId }, existing.updated_at ?? null);
+  });
+}
+
+/**
+ * Sets the limit from `effectiveDate` onward. The record is keyed by its date (one limit per
+ * day), so setting it again for the same date replaces it and earlier days are untouched.
+ */
+export function setDailyLimitLocally(ownerId: string, input: DailyLimitInput) {
+  return inLocalTransaction(async () => {
+    await requireDailyBudget(ownerId);
+    const invalid = validateDailyLimitInput(input, dailyBudgetToday());
+    if (invalid) throw new LocalMutationError(invalid);
+    const amount = roundAmount(input.amount);
+    const existing = await offlineDb.dailyBudgetLimits.get([ownerId, input.effectiveDate]);
+    const now = new Date().toISOString();
+    await offlineDb.dailyBudgetLimits.put({
+      ownerId,
+      effective_date: input.effectiveDate,
+      user_id: ownerId,
+      amount,
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    });
+    await enqueue(
+      ownerId,
+      "daily_limit",
+      input.effectiveDate,
+      existing ? "UPDATE" : "CREATE",
+      { effective_date: input.effectiveDate, amount },
+      existing?.updated_at ?? null
+    );
+  });
+}
+
+/** Removes one limit change; the previous limit then applies from that date again. */
+export function deleteDailyLimitLocally(ownerId: string, effectiveDate: string) {
+  return inLocalTransaction(async () => {
+    await requireDailyBudget(ownerId);
+    const existing = await offlineDb.dailyBudgetLimits.get([ownerId, effectiveDate]);
+    if (!existing) throw new LocalMutationError("This limit change no longer exists.");
+    await offlineDb.dailyBudgetLimits.delete([ownerId, effectiveDate]);
+    await enqueue(
+      ownerId,
+      "daily_limit",
+      effectiveDate,
+      "DELETE",
+      { effective_date: effectiveDate },
+      existing.updated_at ?? null
+    );
   });
 }

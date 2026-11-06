@@ -5,6 +5,14 @@ import {
 } from "@/lib/accounts";
 import { normalizeIncludeInSummary } from "@/lib/accountSummary";
 import { validateBudgetAmount } from "@/lib/budget";
+import {
+  dailyBudgetToday,
+  isDateKey,
+  roundAmount,
+  toCents,
+  validateDailyExpenseInput,
+  validateDailyLimitInput,
+} from "@/lib/dailyBudget";
 import type { createClient } from "@/lib/supabase/server";
 import { countCategoryUsage, validateTransactionInput } from "@/lib/server/validation";
 import {
@@ -41,6 +49,7 @@ type Row = Record<string, unknown>;
  *   UPDATE  the row already holds the requested values
  *   DELETE  the row is already gone
  *   budget  one row per user, compared by amount
+ *   daily_limit  one row per user per effective date (the entity id), compared by amount
  *
  * Last write wins: a conflict exists when the server row changed after the version this device
  * edited (server updated_at > baseUpdatedAt). The later edit wins by edit time: this device's
@@ -97,10 +106,14 @@ function isOperationShape(op: SyncOperation) {
     !!op &&
     typeof op.opId === "string" &&
     typeof op.ownerId === "string" &&
-    ["transaction", "account", "category", "budget"].includes(op.entity) &&
+    ["transaction", "account", "category", "budget", "daily_expense", "daily_limit"].includes(op.entity) &&
     ["CREATE", "UPDATE", "DELETE"].includes(op.op) &&
     typeof op.entityId === "string" &&
-    (op.entity === "budget" ? op.entityId === op.ownerId : UUID.test(op.entityId)) &&
+    (op.entity === "budget"
+      ? op.entityId === op.ownerId
+      : op.entity === "daily_limit"
+        ? isDateKey(op.entityId)
+        : UUID.test(op.entityId)) &&
     !!op.payload &&
     typeof op.payload === "object" &&
     (op.transactionDateIntent === undefined ||
@@ -178,6 +191,10 @@ async function applyOne(supabase: ServerClient, userId: string, op: SyncOperatio
       return applyCategory(supabase, userId, op);
     case "budget":
       return applyBudget(supabase, userId, op, editedAt);
+    case "daily_expense":
+      return applyDailyExpense(supabase, userId, op, editedAt, now);
+    case "daily_limit":
+      return applyDailyLimit(supabase, userId, op, editedAt, now);
   }
 }
 
@@ -546,4 +563,157 @@ async function applyBudget(supabase: ServerClient, userId: string, op: SyncOpera
   }
   const conflict = row ? lastWriteWins(row.updated_at, op.baseUpdatedAt, editedAt).conflict : undefined;
   return done(op, { conflict, serverUpdatedAt: ((saved.data as Row | null)?.updated_at as string) ?? null });
+}
+
+/* ------------------------------------------------------------------ daily budget tracker */
+// Writes only daily_budget_expenses / daily_budget_limits. Never touches accounts,
+// transactions, categories or monthly_budgets.
+
+const DAILY_MIGRATION_MESSAGE = "Run the daily-budget migration before using the daily budget.";
+const DAILY_MIGRATION_MESSAGES = { "42P01": DAILY_MIGRATION_MESSAGE, PGRST205: DAILY_MIGRATION_MESSAGE };
+const DAILY_EXPENSE_FIELDS = ["expense_date", "amount", "description"] as const;
+const DAILY_EXPENSE_SELECT = "id, user_id, expense_date, amount, description, updated_at";
+const DAILY_EXPENSE_MISSING = "This expense no longer exists. It may have been deleted on another device.";
+
+function dailyExpenseColumns(source: Row) {
+  return {
+    expense_date: String(source.expense_date ?? ""),
+    amount: roundAmount(Number(source.amount)),
+    description: typeof source.description === "string" ? source.description.trim() : "",
+  };
+}
+
+type DailyExpenseColumns = ReturnType<typeof dailyExpenseColumns>;
+
+function sameDailyExpense(a: DailyExpenseColumns, b: DailyExpenseColumns) {
+  return a.expense_date === b.expense_date && toCents(a.amount) === toCents(b.amount) && a.description === b.description;
+}
+
+function dailyExpenseError(cols: DailyExpenseColumns, now: Date) {
+  return validateDailyExpenseInput(
+    { amount: cols.amount, expenseDate: cols.expense_date, description: cols.description },
+    dailyBudgetToday(now)
+  );
+}
+
+async function applyDailyExpense(
+  supabase: ServerClient,
+  userId: string,
+  op: SyncOperation,
+  editedAt: string,
+  now: Date
+): Promise<SyncOpResult> {
+  const { row, error } = await loadOwnRow(supabase, "daily_budget_expenses", DAILY_EXPENSE_SELECT, userId, op.entityId);
+  if (error) return fromDbError(op, error, DAILY_MIGRATION_MESSAGES);
+
+  if (op.op === "CREATE") {
+    // The same client-generated id is already stored: a resend of an entry that went through.
+    if (row) return already(op, (row.updated_at as string) ?? null);
+    const cols = dailyExpenseColumns(pick(op.payload, DAILY_EXPENSE_FIELDS));
+    const invalid = dailyExpenseError(cols, now);
+    if (invalid) return rejected(op, invalid);
+    const createdAt = resolveEditedAt(String(op.payload.created_at ?? editedAt), new Date(editedAt));
+    const insert = await supabase
+      .from("daily_budget_expenses")
+      .insert({ id: op.entityId, user_id: userId, ...cols, created_at: createdAt, updated_at: editedAt });
+    if (insert.error) {
+      if (insert.error.code === "23505") {
+        const again = await loadOwnRow(supabase, "daily_budget_expenses", "id, updated_at", userId, op.entityId);
+        if (again.row) return already(op, (again.row.updated_at as string) ?? null);
+      }
+      return fromDbError(op, insert.error, DAILY_MIGRATION_MESSAGES);
+    }
+    return done(op, { serverUpdatedAt: editedAt });
+  }
+
+  if (op.op === "UPDATE") {
+    if (!row) return rejected(op, DAILY_EXPENSE_MISSING);
+    const current = dailyExpenseColumns(row);
+    const next = dailyExpenseColumns({ ...row, ...pick(op.payload, DAILY_EXPENSE_FIELDS) });
+    if (sameDailyExpense(current, next)) return already(op, (row.updated_at as string) ?? null);
+    const lww = lastWriteWins(row.updated_at, op.baseUpdatedAt, editedAt);
+    if (!lww.apply) return done(op, { conflict: lww.conflict, serverUpdatedAt: (row.updated_at as string) ?? null });
+    const invalid = dailyExpenseError(next, now);
+    if (invalid) return rejected(op, invalid);
+    const update = await supabase
+      .from("daily_budget_expenses")
+      .update({ ...next, updated_at: editedAt })
+      .eq("id", op.entityId)
+      .eq("user_id", userId)
+      .select("id")
+      .maybeSingle();
+    if (update.error) return fromDbError(op, update.error, DAILY_MIGRATION_MESSAGES);
+    if (!update.data) return rejected(op, DAILY_EXPENSE_MISSING);
+    return done(op, { conflict: lww.conflict, serverUpdatedAt: editedAt });
+  }
+
+  // DELETE
+  if (!row) return already(op, null);
+  const lww = lastWriteWins(row.updated_at, op.baseUpdatedAt, editedAt);
+  if (!lww.apply) return done(op, { conflict: lww.conflict, serverUpdatedAt: (row.updated_at as string) ?? null });
+  const removed = await supabase
+    .from("daily_budget_expenses")
+    .delete()
+    .eq("id", op.entityId)
+    .eq("user_id", userId)
+    .select("id")
+    .maybeSingle();
+  if (removed.error) return fromDbError(op, removed.error, DAILY_MIGRATION_MESSAGES);
+  return done(op, { conflict: lww.conflict, serverUpdatedAt: null });
+}
+
+/** One limit per user per effective date; the entity id is that date (see isOperationShape). */
+async function applyDailyLimit(
+  supabase: ServerClient,
+  userId: string,
+  op: SyncOperation,
+  editedAt: string,
+  now: Date
+): Promise<SyncOpResult> {
+  const effectiveDate = op.entityId;
+  const { data, error } = await supabase
+    .from("daily_budget_limits")
+    .select("id, effective_date, amount, updated_at")
+    .eq("user_id", userId)
+    .eq("effective_date", effectiveDate)
+    .maybeSingle();
+  if (error) return fromDbError(op, error as NonNullable<DbError>, DAILY_MIGRATION_MESSAGES);
+  const row = (data as Row | null) ?? null;
+
+  if (op.op === "DELETE") {
+    if (!row) return already(op, null);
+    const lww = lastWriteWins(row.updated_at, op.baseUpdatedAt, editedAt);
+    if (!lww.apply) return done(op, { conflict: lww.conflict, serverUpdatedAt: (row.updated_at as string) ?? null });
+    const removed = await supabase
+      .from("daily_budget_limits")
+      .delete()
+      .eq("user_id", userId)
+      .eq("effective_date", effectiveDate);
+    if (removed.error) return fromDbError(op, removed.error, DAILY_MIGRATION_MESSAGES);
+    return done(op, { conflict: lww.conflict, serverUpdatedAt: null });
+  }
+
+  // CREATE and UPDATE both set the limit for this date (upsert on the unique user/date key, so
+  // two devices choosing a limit for the same day can never create two allowances).
+  const amount = roundAmount(Number(op.payload.amount));
+  const invalid = validateDailyLimitInput({ amount, effectiveDate }, dailyBudgetToday(now));
+  if (invalid) return rejected(op, invalid);
+  if (row && toCents(row.amount as number | string) === toCents(amount)) {
+    return already(op, (row.updated_at as string) ?? null);
+  }
+  if (row) {
+    const lww = lastWriteWins(row.updated_at, op.baseUpdatedAt, editedAt);
+    if (!lww.apply) return done(op, { conflict: lww.conflict, serverUpdatedAt: (row.updated_at as string) ?? null });
+  }
+  const saved = await supabase
+    .from("daily_budget_limits")
+    .upsert(
+      { user_id: userId, effective_date: effectiveDate, amount, updated_at: editedAt },
+      { onConflict: "user_id,effective_date" }
+    )
+    .select("updated_at")
+    .single();
+  if (saved.error) return fromDbError(op, saved.error, DAILY_MIGRATION_MESSAGES);
+  const conflict = row ? lastWriteWins(row.updated_at, op.baseUpdatedAt, editedAt).conflict : undefined;
+  return done(op, { conflict, serverUpdatedAt: editedAt });
 }

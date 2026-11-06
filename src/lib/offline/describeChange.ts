@@ -46,5 +46,16 @@ export async function describeChange(entry: OutboxEntry): Promise<string> {
     }
     case "budget":
       return entry.op === "DELETE" ? "Removed the monthly budget" : `Set the monthly budget to ${amountText(payload.amount)}`;
+    case "daily_expense": {
+      if (entry.op === "DELETE") return "Deleted a daily budget expense";
+      const stored = await offlineDb.dailyBudgetExpenses.get([entry.ownerId, entry.entityId]);
+      const source = { ...(stored ?? {}), ...payload } as Record<string, unknown>;
+      const details = [amountText(source.amount), dateText(source.expense_date)].filter(Boolean).join(" · ");
+      return `${entry.op === "CREATE" ? "Added" : "Edited"} daily budget expense${details ? ` ${details}` : ""}`;
+    }
+    case "daily_limit":
+      return entry.op === "DELETE"
+        ? `Removed the daily limit change from ${dateText(entry.entityId)}`
+        : `Set the daily limit to ${amountText(payload.amount)} from ${dateText(entry.entityId)}`;
   }
 }

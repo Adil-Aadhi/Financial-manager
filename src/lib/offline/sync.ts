@@ -263,7 +263,15 @@ async function settle(batch: OutboxEntry[], results: SyncOpResult[]) {
 
   let rejected = false;
   let retryAt: number | null = null;
-  const tables = [offlineDb.outbox, offlineDb.syncConflicts, offlineDb.transactions, offlineDb.accounts, offlineDb.monthlyBudgets];
+  const tables = [
+    offlineDb.outbox,
+    offlineDb.syncConflicts,
+    offlineDb.transactions,
+    offlineDb.accounts,
+    offlineDb.monthlyBudgets,
+    offlineDb.dailyBudgetLimits,
+    offlineDb.dailyBudgetExpenses,
+  ];
   await offlineDb.transaction("rw", tables, async () => {
     for (const entry of batch) {
       const current = await offlineDb.outbox.get(entry.seq!);
@@ -360,6 +368,10 @@ async function recordServerVersion(entry: OutboxEntry, serverUpdatedAt: string) 
     await offlineDb.accounts.update([entry.ownerId, entry.entityId], { updated_at: serverUpdatedAt });
   } else if (entry.entity === "budget") {
     await offlineDb.monthlyBudgets.update(entry.ownerId, { updated_at: serverUpdatedAt });
+  } else if (entry.entity === "daily_expense") {
+    await offlineDb.dailyBudgetExpenses.update([entry.ownerId, entry.entityId], { updated_at: serverUpdatedAt });
+  } else if (entry.entity === "daily_limit") {
+    await offlineDb.dailyBudgetLimits.update([entry.ownerId, entry.entityId], { updated_at: serverUpdatedAt });
   }
   // Categories have no updated_at.
 }
