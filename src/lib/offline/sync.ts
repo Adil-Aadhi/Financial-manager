@@ -7,6 +7,7 @@ import { ensureOfflineBootstrap } from "@/lib/offline/bootstrap";
 import { offlineDb, type OutboxEntry } from "@/lib/offline/db";
 import { describeChange } from "@/lib/offline/describeChange";
 import { OUTBOX_CHANGED_EVENT } from "@/lib/offline/events";
+import { selectRunnableEntries } from "@/lib/offline/queuePolicy";
 import { SYNC_BATCH_SIZE, type SyncBatchResponse, type SyncOperation, type SyncOpResult } from "@/lib/sync/types";
 
 /**
@@ -16,8 +17,8 @@ import { SYNC_BATCH_SIZE, type SyncBatchResponse, type SyncOperation, type SyncO
  *
  * - One run at a time per device: Web Locks across tabs, plus an in-tab guard (the fallback
  *   when Web Locks is unavailable). Resending is harmless, see runSyncBatch.
- * - Stops at the first rejected change (status "failed"): later changes wait, so nothing is
- *   applied out of order. Failed changes need the user to Retry or Discard.
+ * - A rejected change remains visible and durable. Only operations that depend on it wait;
+ *   independent records continue without violating record/reference ordering.
  * - Temporary failures back off 5s → 10s → … capped at 5 minutes, only while visible.
  * - Entries left "syncing" by a closed app go back to "pending" on the next run.
  * - When the outbox is empty after sending something, the normal forced snapshot refresh runs;
@@ -159,16 +160,22 @@ async function runSync() {
       return;
     }
 
-    const firstFailed = entries.findIndex((entry) => entry.status === "failed");
-    const ready = (firstFailed === -1 ? entries : entries.slice(0, firstFailed)).slice(0, SYNC_BATCH_SIZE);
+    const now = Date.now();
+    const ready = selectRunnableEntries(entries, now, SYNC_BATCH_SIZE);
     if (ready.length === 0) {
-      setState({ phase: "paused-failed", nextRetryAt: null });
-      return;
-    }
-    const notBefore = ready[0].nextAttemptAt ?? 0;
-    if (notBefore > Date.now()) {
-      setState({ phase: "waiting-retry", nextRetryAt: notBefore });
-      requestSync(notBefore - Date.now());
+      const nextRetryAt = entries.reduce<number | null>((soonest, entry) => {
+        if (entry.status !== "pending" || !entry.nextAttemptAt || entry.nextAttemptAt <= now) {
+          return soonest;
+        }
+        return soonest === null ? entry.nextAttemptAt : Math.min(soonest, entry.nextAttemptAt);
+      }, null);
+      if (nextRetryAt !== null) requestSync(nextRetryAt - now);
+      setState({
+        phase: entries.some((entry) => entry.status === "failed")
+          ? "paused-failed"
+          : "waiting-retry",
+        nextRetryAt,
+      });
       return;
     }
 
@@ -195,20 +202,13 @@ async function runSync() {
     }
     if (response.status === "invalid") {
       await settle(batch, [{ opId: batch[0].opId, status: "rejected", error: response.error ?? "This change is malformed." }]);
-      setState({ phase: "paused-failed", nextRetryAt: null });
-      return;
+      continue;
     }
 
     const outcome = await settle(batch, response.results);
     sentSomething = true;
-    if (outcome.rejected) {
-      setState({ phase: "paused-failed", nextRetryAt: null });
-      return;
-    }
     if (outcome.retryAt !== null) {
-      setState({ phase: "waiting-retry", nextRetryAt: outcome.retryAt });
       requestSync(outcome.retryAt - Date.now());
-      return;
     }
   }
 }
