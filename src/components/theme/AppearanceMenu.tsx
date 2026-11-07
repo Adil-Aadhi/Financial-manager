@@ -32,6 +32,7 @@ export function AppearanceMenu() {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
       const t = e.target as Node;
+      if (!document.contains(t)) return;
       if (!panelRef.current?.contains(t) && !buttonRef.current?.contains(t)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);

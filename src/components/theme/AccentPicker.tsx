@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef } from "react";
+import React from "react";
 import { Check, Pipette } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useTheme } from "./ThemeProvider";
@@ -9,8 +9,9 @@ import { ACCENT_PRESETS, hexToAccent } from "./accent";
 /** Accent colour swatches + a custom colour picker. */
 export function AccentPicker({ className }: { className?: string }) {
   const { accent, setAccent } = useTheme();
-  const inputRef = useRef<HTMLInputElement>(null);
   const isCustom = accent.id === "custom";
+  const activePreset = ACCENT_PRESETS.find((p) => p.id === accent.id);
+  const currentColor = accent.hex ?? activePreset?.swatch ?? "#10b981";
 
   return (
     <div className={cn("flex flex-wrap items-center gap-2.5", className)} role="radiogroup" aria-label="Accent colour">
@@ -32,24 +33,20 @@ export function AccentPicker({ className }: { className?: string }) {
             )}
             style={{ background: p.swatch }}
           >
-            <span className="absolute inset-0 rounded-full bg-gradient-to-b from-white/35 to-transparent" />
-            {active && <Check className="relative h-4 w-4 text-white drop-shadow" strokeWidth={3} />}
+            <span className="pointer-events-none absolute inset-0 rounded-full bg-gradient-to-b from-white/35 to-transparent" />
+            {active && <Check className="pointer-events-none relative h-4 w-4 text-white drop-shadow" strokeWidth={3} />}
           </button>
         );
       })}
 
       {/* Custom colour */}
-      <button
-        type="button"
-        role="radio"
-        aria-checked={isCustom}
-        aria-label="Custom colour"
+      <label
         title="Custom colour"
-        onClick={() => inputRef.current?.click()}
         className={cn(
           "relative flex h-9 w-9 cursor-pointer items-center justify-center overflow-hidden rounded-full transition-all duration-200",
           "ring-offset-2 ring-offset-[var(--glass-strong)] hover:scale-105",
-          isCustom ? "ring-2 ring-fg" : "ring-1 ring-line-strong"
+          isCustom ? "ring-2 ring-fg" : "ring-1 ring-line-strong",
+          "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-fg"
         )}
         style={{
           background: isCustom
@@ -57,22 +54,21 @@ export function AccentPicker({ className }: { className?: string }) {
             : "conic-gradient(from 0deg, #ef4444, #f97316, #eab308, #22c55e, #06b6d4, #3b82f6, #a855f7, #ec4899, #ef4444)",
         }}
       >
-        <span className="absolute inset-0 rounded-full bg-gradient-to-b from-white/30 to-transparent" />
+        <span className="pointer-events-none absolute inset-0 rounded-full bg-gradient-to-b from-white/30 to-transparent" />
         {isCustom ? (
-          <Check className="relative h-4 w-4 text-white drop-shadow" strokeWidth={3} />
+          <Check className="pointer-events-none relative h-4 w-4 text-white drop-shadow" strokeWidth={3} />
         ) : (
-          <Pipette className="relative h-4 w-4 text-white drop-shadow" strokeWidth={2.5} />
+          <Pipette className="pointer-events-none relative h-4 w-4 text-white drop-shadow" strokeWidth={2.5} />
         )}
         <input
-          ref={inputRef}
           type="color"
-          tabIndex={-1}
-          aria-hidden="true"
-          value={accent.hex ?? "#10b981"}
+          aria-label="Custom colour"
+          title="Custom colour"
+          value={currentColor}
           onChange={(e) => setAccent(hexToAccent(e.target.value))}
-          className="pointer-events-none absolute inset-0 h-full w-full opacity-0"
+          className="absolute inset-0 h-full w-full cursor-pointer opacity-0 focus-visible:outline-none"
         />
-      </button>
+      </label>
     </div>
   );
 }

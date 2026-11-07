@@ -19,6 +19,11 @@ export const CATEGORY_ICON_OPTIONS = [
   { value: "film", label: "Entertainment" },
   { value: "plane", label: "Travel" },
   { value: "sparkles", label: "Personal care" },
+  { value: "fuel", label: "Fuel" },
+  { value: "shopping-cart", label: "Groceries" },
+  { value: "notebook-pen", label: "Stationery" },
+  { value: "settings", label: "Maintenance" },
+  { value: "car-battery", label: "Vehicle maintenance" },
   { value: "circle-ellipsis", label: "Other" },
 ] as const;
 
