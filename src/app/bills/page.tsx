@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getBillsServerData } from "@/lib/supabase/bills";
 
 export const instant = false;
-export const metadata: Metadata = { title: "Bills | FinanceTracker", description: "Track recurring bills and manually confirmed payments." };
+export const metadata: Metadata = { title: "Bills | AccountTracker", description: "Track recurring bills and manually confirmed payments." };
 
 export default async function BillsPage({ searchParams }: { searchParams: Promise<{ selected?: string; add?: string }> }) {
   const { user, profile } = await getAuthenticatedUserProfile();

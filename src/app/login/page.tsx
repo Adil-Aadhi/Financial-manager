@@ -7,8 +7,8 @@ import { LoginForm } from "@/components/auth/LoginForm";
 export const instant = false;
 
 export const metadata: Metadata = {
-  title: "Sign In | FinanceTracker",
-  description: "Sign in to your Finance Tracker account to monitor your cash flow and financial goals.",
+  title: "Sign In | AccountTracker",
+  description: "Sign in to your AccountTracker account to monitor your cash flow and financial goals.",
 };
 
 export default async function LoginPage() {

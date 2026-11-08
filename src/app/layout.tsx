@@ -27,14 +27,14 @@ const manrope = Manrope({
 });
 
 export const metadata: Metadata = {
-  title: "FinanceTracker",
+  title: "AccountTracker",
   description: "Track spending, budgets and savings goals with clarity.",
   manifest: "/manifest.webmanifest",
-  applicationName: "FinanceTracker",
+  applicationName: "AccountTracker",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "FinanceTracker",
+    title: "AccountTracker",
   },
   icons: {
     icon: [

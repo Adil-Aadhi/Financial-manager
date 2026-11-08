@@ -21,7 +21,7 @@ const BOOTSTRAP_FRESH_MS = 60_000;
 const MISSING_OBJECT_CODES = new Set(["42P01", "PGRST205"]);
 
 /** Dispatched on window after a successful server mutation; mounted pages refresh on it. */
-export const OFFLINE_DATA_STALE_EVENT = "finance-tracker:offline-data-stale";
+export const OFFLINE_DATA_STALE_EVENT = "account-tracker:offline-data-stale";
 
 /**
  * Bumped by markOfflineDataStale() after every successful server mutation. A refresh records

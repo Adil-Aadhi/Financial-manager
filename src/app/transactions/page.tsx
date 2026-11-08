@@ -11,7 +11,7 @@ import { createClient } from "@/lib/supabase/server";
 export const instant = false;
 
 export const metadata: Metadata = {
-  title: "Transactions | FinanceTracker",
+  title: "Transactions | AccountTracker",
   description: "Your accounts, income, and expenses.",
 };
 

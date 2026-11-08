@@ -3,8 +3,8 @@ import { AuthLayout } from "@/components/auth/AuthLayout";
 import { ForgotPasswordForm } from "@/components/auth/ForgotPasswordForm";
 
 export const metadata: Metadata = {
-  title: "Reset Password | FinanceTracker",
-  description: "Reset your FinanceTracker password securely with a one-time email code.",
+  title: "Reset Password | AccountTracker",
+  description: "Reset your AccountTracker password securely with a one-time email code.",
 };
 
 export default function ForgotPasswordPage() {

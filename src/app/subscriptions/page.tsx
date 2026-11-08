@@ -10,7 +10,7 @@ import { subscriptionToday } from "@/lib/subscriptions";
 export const instant = false;
 
 export const metadata: Metadata = {
-  title: "Subscriptions | FinanceTracker",
+  title: "Subscriptions | AccountTracker",
   description: "Track recurring services and manually confirm their payments.",
 };
 

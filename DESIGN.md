@@ -1,4 +1,4 @@
-# FinanceTracker Design System: "Aurora Glass"
+# AccountTracker Design System: "Aurora Glass"
 
 This is the visual language for the whole app. **Every agent or developer adding UI must
 follow this file.** If something you need isn't covered, extend the system (tokens and

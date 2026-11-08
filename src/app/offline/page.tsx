@@ -7,7 +7,7 @@ import { buttonBase, buttonSizes, buttonVariants } from "@/components/ui/Button"
 import { cn } from "@/lib/cn";
 
 export const metadata: Metadata = {
-  title: "Offline | FinanceTracker",
+  title: "Offline | AccountTracker",
 };
 
 export default function OfflinePage() {
@@ -29,7 +29,7 @@ export default function OfflinePage() {
           href="/home"
           className={cn(buttonBase, buttonVariants.primary, buttonSizes.lg, "mt-6 w-full")}
         >
-          Open FinanceTracker
+          Open AccountTracker
         </Link>
       </section>
     </main>

@@ -9,7 +9,7 @@ import { createClient } from "@/lib/supabase/server";
 
 export const instant = false;
 export const metadata: Metadata = {
-  title: "Installments | FinanceTracker",
+  title: "Installments | AccountTracker",
   description: "EMI and Buy Now Pay Later plans with schedules and payment history.",
 };
 

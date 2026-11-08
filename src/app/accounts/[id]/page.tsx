@@ -23,7 +23,7 @@ interface AccountPageProps {
 export async function generateMetadata({ params }: AccountPageProps): Promise<Metadata> {
   const { id } = await params;
   return {
-    title: `Account ${id} | FinanceTracker`,
+    title: `Account ${id} | AccountTracker`,
     description: "Account balance and transaction history.",
   };
 }

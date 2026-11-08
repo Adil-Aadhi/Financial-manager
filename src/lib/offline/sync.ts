@@ -42,7 +42,7 @@ export interface SyncState {
   message: string | null;
 }
 
-const LOCK_NAME = "finance-tracker-outbox-sync";
+const LOCK_NAME = "account-tracker-outbox-sync";
 const BASE_BACKOFF_MS = 5_000;
 const MAX_BACKOFF_MS = 5 * 60_000;
 /** Server-side temporary errors become "failed" (shown to the user) after this many tries. */

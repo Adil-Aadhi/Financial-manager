@@ -14,7 +14,7 @@ import { ReportsSkeleton } from "@/components/reports/ReportsSkeleton";
 export const instant = false;
 
 export const metadata: Metadata = {
-  title: "Reports | FinanceTracker",
+  title: "Reports | AccountTracker",
   description: "Income, spending and savings trends.",
 };
 
