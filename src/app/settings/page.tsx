@@ -11,7 +11,7 @@ import { SignOutButton } from "@/components/auth/SignOutButton";
 export const instant = false;
 
 export const metadata: Metadata = {
-  title: "Settings | FinanceTracker",
+  title: "Settings | AccountTracker",
   description: "Profile and preferences.",
 };
 

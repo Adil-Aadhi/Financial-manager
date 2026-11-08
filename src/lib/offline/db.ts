@@ -277,7 +277,7 @@ class FinanceOfflineDatabase extends Dexie {
   syncConflicts!: EntityTable<SyncConflictRecord, "id">;
 
   constructor() {
-    super("finance-tracker-offline");
+    super("account-tracker-offline");
     this.version(1).stores({
       profiles: "&ownerId, id",
       accounts: "&[ownerId+id], ownerId, [ownerId+deleted_at], created_at",

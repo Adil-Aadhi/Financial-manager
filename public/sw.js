@@ -1,14 +1,15 @@
-// v4: route warming is single-flight and bounded; runtime cache writes stay off the response path.
+// v5: refreshed brand assets; route warming remains single-flight and bounded.
 // The private cache keeps its name on purpose: its contents are unchanged, and renaming it
 // would make activate() delete every route saved for offline use.
-const CACHE_VERSION = "finance-tracker-shell-v4";
-const PRIVATE_CACHE_VERSION = "finance-tracker-private-v2";
+const CACHE_VERSION = "account-tracker-shell-v1";
+const PRIVATE_CACHE_VERSION = "account-tracker-private-v1";
 const ROUTE_CACHE_CONCURRENCY = 2;
 const OFFLINE_URL = "/offline";
 const PRECACHE_URLS = [
   OFFLINE_URL,
   "/manifest.webmanifest",
-  "/icon.svg",
+  "/icon.png",
+  "/assets/account-tracker-mark-256.webp",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
   "/icons/icon-maskable-512.png",

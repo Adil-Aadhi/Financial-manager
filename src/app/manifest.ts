@@ -3,8 +3,8 @@ import type { MetadataRoute } from "next";
 export default function manifest(): MetadataRoute.Manifest {
   return {
     id: "/",
-    name: "FinanceTracker",
-    short_name: "Finance",
+    name: "AccountTracker",
+    short_name: "Account",
     description: "Track accounts, transactions, budgets and reports.",
     start_url: "/home",
     scope: "/",

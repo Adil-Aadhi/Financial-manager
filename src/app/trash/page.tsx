@@ -14,7 +14,7 @@ import { TIME_ZONE_COOKIE, resolveTimeZone } from "@/lib/month";
 export const instant = false;
 
 export const metadata: Metadata = {
-  title: "Trash | FinanceTracker",
+  title: "Trash | AccountTracker",
   description: "Restore soft-deleted accounts and transactions.",
 };
 

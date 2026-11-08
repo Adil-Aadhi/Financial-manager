@@ -3,7 +3,7 @@ import "client-only";
 import { offlineDb } from "@/lib/offline/db";
 
 const PRIVATE_CACHE_CLEAR_TIMEOUT_MS = 5_000;
-const PRIVATE_CACHE_NAME = "finance-tracker-private-v2";
+const PRIVATE_CACHE_NAME = "account-tracker-private-v1";
 
 async function deletePrivateCacheDirectly() {
   if ("caches" in window) await window.caches.delete(PRIVATE_CACHE_NAME);

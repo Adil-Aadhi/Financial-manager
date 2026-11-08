@@ -24,7 +24,7 @@ import { normalizeTransactionDate } from "@/lib/transactions";
 export const instant = false;
 
 export const metadata: Metadata = {
-  title: "Home | FinanceTracker",
+  title: "Home | AccountTracker",
   description: "Your balance, cash flow and recent activity.",
 };
 

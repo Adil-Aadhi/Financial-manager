@@ -12,7 +12,7 @@ import { createClient } from "@/lib/supabase/server";
 export const instant = false;
 
 export const metadata: Metadata = {
-  title: "Daily budget | FinanceTracker",
+  title: "Daily budget | AccountTracker",
   description: "Your daily spending allowance, carry-forward balance and monthly history.",
 };
 

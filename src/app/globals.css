@@ -2,7 +2,7 @@
 
 /*
  * ============================================================================
- *  FinanceTracker — "Aurora Glass" design system
+ *  AccountTracker — "Aurora Glass" design system
  *  Single source of truth for colour, surface, radius, shadow and motion.
  *  Read /DESIGN.md before adding UI. Never hard-code slate/zinc/hex colours in
  *  components — use the semantic tokens below (bg-canvas, text-fg, glass ...).

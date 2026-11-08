@@ -7,8 +7,8 @@ import { RegisterForm } from "@/components/auth/RegisterForm";
 export const instant = false;
 
 export const metadata: Metadata = {
-  title: "Sign Up | FinanceTracker",
-  description: "Create your FinanceTracker account.",
+  title: "Sign Up | AccountTracker",
+  description: "Create your AccountTracker account.",
 };
 
 export default async function RegisterPage() {
