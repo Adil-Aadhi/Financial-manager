@@ -21,6 +21,7 @@ const FIXED_OFFLINE_ROUTES = [
   "/reports",
   "/settings",
   "/daily-budget",
+  "/subscriptions",
 ] as const;
 
 export function OfflineDataProvider({ children }: { children: React.ReactNode }) {

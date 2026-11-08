@@ -9,6 +9,7 @@ import {
 import { validateBudgetAmount } from "@/lib/budget";
 import {
   dailyBudgetToday,
+  isDateKey,
   roundAmount,
   validateDailyExpenseInput,
   validateDailyLimitInput,
@@ -16,6 +17,13 @@ import {
   type DailyLimitInput,
 } from "@/lib/dailyBudget";
 import { isCategoryType } from "@/lib/categories";
+import {
+  addBillingCycle,
+  isSubscriptionLifecycle,
+  validateSubscriptionInput,
+  type SubscriptionInput,
+  type SubscriptionLifecycle,
+} from "@/lib/subscriptions";
 import {
   ACCOUNT_RESTORE_WINDOW_MS,
   accountFieldsError,
@@ -71,6 +79,7 @@ const MOVABLE_ENTITIES = new Set<OutboxEntity>([
   "budget",
   "daily_expense",
   "daily_limit",
+  "subscription_payment",
 ]);
 
 function newId() {
@@ -256,6 +265,8 @@ const WRITE_TABLES = [
   offlineDb.monthlyBudgets,
   offlineDb.dailyBudgetLimits,
   offlineDb.dailyBudgetExpenses,
+  offlineDb.subscriptions,
+  offlineDb.subscriptionPayments,
   offlineDb.syncMeta,
   offlineDb.outbox,
 ];
@@ -755,5 +766,177 @@ export function deleteDailyLimitLocally(ownerId: string, effectiveDate: string) 
       { effective_date: effectiveDate },
       existing.updated_at ?? null
     );
+  });
+}
+
+/* ---------------------------------------------------------------- subscriptions tracker */
+
+async function requireSubscriptions(ownerId: string) {
+  await requireLocalSnapshot(ownerId);
+  const meta = await offlineDb.syncMeta.get(ownerId);
+  if (meta?.subscriptionsAvailable !== true) {
+    throw new LocalMutationError(
+      "Subscriptions aren't ready on this device yet. Connect to the internet once, then try again."
+    );
+  }
+}
+
+export interface LocalSubscriptionInput extends SubscriptionInput {
+  id: string;
+  startDate: string;
+  lifecycle?: SubscriptionLifecycle;
+}
+
+function subscriptionColumns(input: LocalSubscriptionInput) {
+  const [, , day] = input.nextPaymentDate.split("-").map(Number);
+  return {
+    name: input.name.trim(),
+    icon: input.icon,
+    amount: roundAmount(input.amount),
+    currency: input.currency,
+    billing_cycle: input.billingCycle,
+    billing_anchor_day: day,
+    start_date: input.startDate,
+    next_payment_date: input.nextPaymentDate,
+    lifecycle: input.lifecycle ?? ("active" as const),
+    notes: input.notes.trim() || null,
+  };
+}
+
+function validateLocalSubscription(input: LocalSubscriptionInput) {
+  const invalid = validateSubscriptionInput(input);
+  if (invalid) return invalid;
+  if (!isDateKey(input.startDate)) return "Choose a valid start date.";
+  if (input.lifecycle && !isSubscriptionLifecycle(input.lifecycle)) return "Choose a valid subscription state.";
+  return null;
+}
+
+export function createSubscriptionLocally(ownerId: string, input: LocalSubscriptionInput) {
+  return inLocalTransaction(async () => {
+    await requireSubscriptions(ownerId);
+    const invalid = validateLocalSubscription(input);
+    if (invalid) throw new LocalMutationError(invalid);
+    if (await offlineDb.subscriptions.get([ownerId, input.id])) return;
+    const now = new Date().toISOString();
+    const row = {
+      ownerId,
+      id: input.id,
+      user_id: ownerId,
+      ...subscriptionColumns(input),
+      created_at: now,
+      updated_at: now,
+    };
+    await offlineDb.subscriptions.add(row);
+    const { ownerId: _owner, ...payload } = row;
+    void _owner;
+    await enqueue(ownerId, "subscription", input.id, "CREATE", payload, null);
+  });
+}
+
+export function updateSubscriptionLocally(ownerId: string, input: LocalSubscriptionInput) {
+  return inLocalTransaction(async () => {
+    await requireSubscriptions(ownerId);
+    const existing = await offlineDb.subscriptions.get([ownerId, input.id]);
+    if (!existing) throw new LocalMutationError("This subscription no longer exists.");
+    const invalid = validateLocalSubscription(input);
+    if (invalid) throw new LocalMutationError(invalid);
+    const changes = { ...subscriptionColumns(input), updated_at: new Date().toISOString() };
+    await offlineDb.subscriptions.update([ownerId, input.id], changes);
+    await enqueue(ownerId, "subscription", input.id, "UPDATE", changes, existing.updated_at ?? null);
+  });
+}
+
+export function setSubscriptionLifecycleLocally(
+  ownerId: string,
+  subscriptionId: string,
+  lifecycle: SubscriptionLifecycle
+) {
+  return inLocalTransaction(async () => {
+    await requireSubscriptions(ownerId);
+    if (!isSubscriptionLifecycle(lifecycle)) throw new LocalMutationError("Choose a valid subscription state.");
+    const existing = await offlineDb.subscriptions.get([ownerId, subscriptionId]);
+    if (!existing) throw new LocalMutationError("This subscription no longer exists.");
+    const changes = { lifecycle, updated_at: new Date().toISOString() };
+    await offlineDb.subscriptions.update([ownerId, subscriptionId], changes);
+    await enqueue(ownerId, "subscription", subscriptionId, "UPDATE", changes, existing.updated_at ?? null);
+  });
+}
+
+export function deleteSubscriptionLocally(ownerId: string, subscriptionId: string) {
+  return inLocalTransaction(async () => {
+    await requireSubscriptions(ownerId);
+    const existing = await offlineDb.subscriptions.get([ownerId, subscriptionId]);
+    if (!existing) throw new LocalMutationError("This subscription no longer exists.");
+    await offlineDb.subscriptions.delete([ownerId, subscriptionId]);
+    const payments = await offlineDb.subscriptionPayments
+      .where("[ownerId+subscription_id]").equals([ownerId, subscriptionId]).toArray();
+    await offlineDb.subscriptionPayments.bulkDelete(payments.map((payment) => [ownerId, payment.id]));
+    await enqueue(ownerId, "subscription", subscriptionId, "DELETE", { id: subscriptionId }, existing.updated_at ?? null);
+  });
+}
+
+export function markSubscriptionPaidLocally(
+  ownerId: string,
+  input: { paymentId: string; subscriptionId: string; dueDate: string; paidAt?: string }
+) {
+  return inLocalTransaction(async () => {
+    await requireSubscriptions(ownerId);
+    const subscription = await offlineDb.subscriptions.get([ownerId, input.subscriptionId]);
+    if (!subscription) throw new LocalMutationError("This subscription no longer exists.");
+    if (subscription.lifecycle !== "active") throw new LocalMutationError("Resume this subscription before marking it paid.");
+    const existing = await offlineDb.subscriptionPayments.get([ownerId, input.paymentId]);
+    if (existing) return;
+    if (subscription.next_payment_date !== input.dueDate) throw new LocalMutationError("This billing cycle is no longer current.");
+    const paidAt = input.paidAt ?? new Date().toISOString();
+    const nextPaymentDate = addBillingCycle(input.dueDate, subscription.billing_cycle, subscription.billing_anchor_day);
+    const payment = {
+      ownerId,
+      id: input.paymentId,
+      user_id: ownerId,
+      subscription_id: input.subscriptionId,
+      due_date: input.dueDate,
+      paid_at: paidAt,
+      created_at: paidAt,
+      updated_at: paidAt,
+    };
+    await offlineDb.subscriptionPayments.add(payment);
+    await offlineDb.subscriptions.update([ownerId, input.subscriptionId], {
+      next_payment_date: nextPaymentDate,
+      updated_at: paidAt,
+    });
+    const { ownerId: _owner, ...payload } = payment;
+    void _owner;
+    await enqueue(ownerId, "subscription_payment", input.paymentId, "CREATE", {
+      ...payload,
+      next_payment_date: nextPaymentDate,
+    }, null);
+  });
+}
+
+export function undoSubscriptionPaymentLocally(
+  ownerId: string,
+  input: { paymentId: string; subscriptionId: string; dueDate: string }
+) {
+  return inLocalTransaction(async () => {
+    await requireSubscriptions(ownerId);
+    const [subscription, payment] = await Promise.all([
+      offlineDb.subscriptions.get([ownerId, input.subscriptionId]),
+      offlineDb.subscriptionPayments.get([ownerId, input.paymentId]),
+    ]);
+    if (!subscription || !payment) throw new LocalMutationError("This payment no longer exists.");
+    const expectedNext = addBillingCycle(payment.due_date, subscription.billing_cycle, subscription.billing_anchor_day);
+    if (subscription.next_payment_date !== expectedNext) {
+      throw new LocalMutationError("Only the most recently confirmed payment can be undone.");
+    }
+    const now = new Date().toISOString();
+    await offlineDb.subscriptionPayments.delete([ownerId, input.paymentId]);
+    await offlineDb.subscriptions.update([ownerId, input.subscriptionId], {
+      next_payment_date: input.dueDate,
+      updated_at: now,
+    });
+    await enqueue(ownerId, "subscription_payment", input.paymentId, "DELETE", {
+      subscription_id: input.subscriptionId,
+      due_date: input.dueDate,
+    }, payment.updated_at ?? null);
   });
 }

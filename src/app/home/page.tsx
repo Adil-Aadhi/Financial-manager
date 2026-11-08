@@ -6,12 +6,14 @@ import {
   type HomeTransaction,
 } from "@/components/home/OfflineHomeDashboard";
 import { DailyBudgetHomeCard } from "@/components/dailyBudget/DailyBudgetHomeCard";
+import { SubscriptionHomeCard } from "@/components/subscriptions/SubscriptionHomeCard";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
 import { dailyBudgetToday, monthFirstDay, monthOfDate } from "@/lib/dailyBudget";
 import { getDailyBudgetServerData } from "@/lib/supabase/dailyBudget";
 import { getTransactionMonthRange } from "@/lib/month";
 import { getMonthlyBudgetOverview } from "@/lib/supabase/budget";
 import { getAuthenticatedUserProfile } from "@/lib/supabase/profile";
+import { getSubscriptionsServerData } from "@/lib/supabase/subscriptions";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeTransactionDate } from "@/lib/transactions";
 
@@ -31,7 +33,7 @@ export default async function HomePage() {
   const supabase = await createClient();
   const today = dailyBudgetToday();
 
-  const [accountsResult, transactionsResult, budget, dailyBudget] = await Promise.all([
+  const [accountsResult, transactionsResult, budget, dailyBudget, subscriptions] = await Promise.all([
     supabase
       .from("accounts")
       .select("id, name, opening_balance, currency, include_in_summary, deleted_at, created_at")
@@ -46,6 +48,7 @@ export default async function HomePage() {
     getMonthlyBudgetOverview(supabase, user.id, profile.default_currency, month),
     // Independent Daily Budget Tracker: only its own tables, current month's entries.
     getDailyBudgetServerData(supabase, user.id, monthFirstDay(monthOfDate(today))),
+    getSubscriptionsServerData(supabase, user.id),
   ]);
 
   let accounts: HomeAccount[] = (accountsResult.data ?? []).map((account) => ({
@@ -128,6 +131,14 @@ export default async function HomePage() {
             ownerId={user.id}
             currency={profile.default_currency}
             server={dailyBudget}
+            serverToday={today}
+          />
+        }
+        subscriptionsCard={
+          <SubscriptionHomeCard
+            ownerId={user.id}
+            currency={profile.default_currency}
+            server={subscriptions}
             serverToday={today}
           />
         }

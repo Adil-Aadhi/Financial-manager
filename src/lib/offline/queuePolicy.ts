@@ -1,6 +1,6 @@
 export interface QueuePolicyEntry {
   seq?: number;
-  entity: "transaction" | "account" | "category" | "budget" | "daily_expense" | "daily_limit";
+  entity: "transaction" | "account" | "category" | "budget" | "daily_expense" | "daily_limit" | "subscription" | "subscription_payment";
   entityId: string;
   op: "CREATE" | "UPDATE" | "DELETE";
   payload: Record<string, unknown>;
@@ -45,6 +45,23 @@ export function dependsOn(entry: QueuePolicyEntry, earlier: QueuePolicyEntry) {
     return (
       earlier.op === "DELETE" || references(earlier.payload, "category_id", entry.entityId)
     );
+  }
+
+  if (
+    entry.entity === "subscription_payment" &&
+    earlier.entity === "subscription" &&
+    references(entry.payload, "subscription_id", earlier.entityId)
+  ) {
+    return true;
+  }
+
+  if (
+    entry.entity === "subscription" &&
+    entry.op === "DELETE" &&
+    earlier.entity === "subscription_payment" &&
+    references(earlier.payload, "subscription_id", entry.entityId)
+  ) {
+    return true;
   }
 
   return false;

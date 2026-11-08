@@ -66,6 +66,7 @@ export function OfflineHomeDashboard({
   month,
   serverSnapshot,
   dailyBudgetCard,
+  subscriptionsCard,
 }: {
   ownerId: string;
   currency: SupportedCurrency;
@@ -73,6 +74,8 @@ export function OfflineHomeDashboard({
   serverSnapshot: HomeSnapshot;
   /** Daily Budget Tracker card, shown directly above the Monthly Budget card. */
   dailyBudgetCard?: React.ReactNode;
+  /** Isolated recurring-payment reminders, rendered after Monthly Budget. */
+  subscriptionsCard?: React.ReactNode;
 }) {
   const serverVersion = [
     ...serverSnapshot.accounts.map((account) => `${account.id}:${account.opening_balance}:${account.deleted_at ?? ""}:${normalizeIncludeInSummary(account.include_in_summary)}`),
@@ -156,6 +159,7 @@ export function OfflineHomeDashboard({
       currency={localSnapshot?.currency ?? currency}
       month={month}
       dailyBudgetCard={dailyBudgetCard}
+      subscriptionsCard={subscriptionsCard}
     />
   );
 }
@@ -169,11 +173,13 @@ function HomeDashboard({
   currency,
   month,
   dailyBudgetCard,
+  subscriptionsCard,
 }: {
   snapshot: HomeSnapshot;
   currency: SupportedCurrency;
   month: MonthRange;
   dailyBudgetCard?: React.ReactNode;
+  subscriptionsCard?: React.ReactNode;
 }) {
   const data = useMemo(() => calculateDashboard(snapshot, currency, month.prefix), [snapshot, currency, month.prefix]);
 
@@ -215,6 +221,8 @@ function HomeDashboard({
         currency={currency}
         monthLabel={month.label}
       />
+
+      {subscriptionsCard}
 
       <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-3">
         <div className="space-y-4 sm:space-y-5 lg:col-span-2">

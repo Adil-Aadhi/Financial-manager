@@ -26,6 +26,7 @@ export async function syncOutboxAction(operations: unknown): Promise<SyncBatchRe
     revalidatePath("/categories");
     revalidatePath("/trash");
     revalidatePath("/daily-budget");
+    revalidatePath("/subscriptions");
     revalidatePath("/accounts/[id]", "page");
   }
   return response;
