@@ -6,6 +6,17 @@ import {
 import { normalizeIncludeInSummary } from "@/lib/accountSummary";
 import { validateBudgetAmount } from "@/lib/budget";
 import {
+  addBillCycle,
+  isBillAmountType,
+  isBillCategory,
+  isBillCycle,
+  isBillIcon,
+  isBillLifecycle,
+  sameBillMoney,
+  validateBillInput,
+  validateBillPayment,
+} from "@/lib/bills";
+import {
   dailyBudgetToday,
   isDateKey,
   roundAmount,
@@ -114,7 +125,7 @@ function isOperationShape(op: SyncOperation) {
     !!op &&
     typeof op.opId === "string" &&
     typeof op.ownerId === "string" &&
-    ["transaction", "account", "category", "budget", "daily_expense", "daily_limit", "subscription", "subscription_payment"].includes(op.entity) &&
+    ["transaction", "account", "category", "budget", "daily_expense", "daily_limit", "subscription", "subscription_payment", "bill", "bill_payment"].includes(op.entity) &&
     ["CREATE", "UPDATE", "DELETE"].includes(op.op) &&
     typeof op.entityId === "string" &&
     (op.entity === "budget"
@@ -207,6 +218,10 @@ async function applyOne(supabase: ServerClient, userId: string, op: SyncOperatio
       return applySubscription(supabase, userId, op, editedAt);
     case "subscription_payment":
       return applySubscriptionPayment(supabase, userId, op, editedAt);
+    case "bill":
+      return applyBill(supabase, userId, op, editedAt);
+    case "bill_payment":
+      return applyBillPayment(supabase, userId, op, editedAt);
   }
 }
 
@@ -903,4 +918,179 @@ async function applySubscriptionPayment(
     if (!advanced.data) return rejected(op, SUBSCRIPTION_MISSING);
   }
   return payment ? already(op, (payment.updated_at as string) ?? null) : done(op, { serverUpdatedAt: editedAt });
+}
+
+/* ------------------------------------------------------------------ bills tracker */
+
+const BILL_MIGRATION_MESSAGE = "Run the Bills migration before using bills.";
+const BILL_MIGRATION_MESSAGES = { "42P01": BILL_MIGRATION_MESSAGE, "42703": BILL_MIGRATION_MESSAGE, PGRST205: BILL_MIGRATION_MESSAGE };
+const BILL_FIELDS = ["name", "category", "icon", "amount_type", "expected_amount", "currency", "billing_cycle", "billing_interval", "billing_anchor_day", "start_date", "next_due_date", "reminder_days", "lifecycle", "notes"] as const;
+const BILL_SELECT = "id, user_id, name, category, icon, amount_type, expected_amount, currency, billing_cycle, billing_interval, billing_anchor_day, start_date, next_due_date, reminder_days, lifecycle, notes, created_at, updated_at";
+const BILL_PAYMENT_SELECT = "id, user_id, bill_id, due_date, expected_amount, actual_amount, payment_date, paid_at, status, created_at, updated_at";
+
+function billColumns(source: Row) {
+  const notes = typeof source.notes === "string" ? source.notes.trim() : "";
+  const expected = source.expected_amount === null || source.expected_amount === undefined || source.expected_amount === "" ? null : roundAmount(Number(source.expected_amount));
+  return {
+    name: typeof source.name === "string" ? source.name.trim() : "",
+    category: String(source.category ?? ""), icon: String(source.icon ?? ""), amount_type: String(source.amount_type ?? ""),
+    expected_amount: expected, currency: String(source.currency ?? "").toUpperCase(), billing_cycle: String(source.billing_cycle ?? ""),
+    billing_interval: Number(source.billing_interval), billing_anchor_day: Number(source.billing_anchor_day),
+    start_date: String(source.start_date ?? ""), next_due_date: String(source.next_due_date ?? ""),
+    reminder_days: Number(source.reminder_days), lifecycle: String(source.lifecycle ?? ""), notes: notes || null,
+  };
+}
+type BillColumns = ReturnType<typeof billColumns>;
+
+function billError(cols: BillColumns) {
+  if (!isBillCategory(cols.category)) return "Choose a valid bill category.";
+  if (!isBillIcon(cols.icon)) return "Choose a valid bill icon.";
+  if (!isBillAmountType(cols.amount_type)) return "Choose a valid amount type.";
+  if (!isBillCycle(cols.billing_cycle)) return "Choose a valid billing frequency.";
+  if (!isBillLifecycle(cols.lifecycle)) return "Choose a valid bill state.";
+  if (!Number.isInteger(cols.billing_anchor_day) || cols.billing_anchor_day < 1 || cols.billing_anchor_day > 31) return "Choose a valid billing date.";
+  return validateBillInput({
+    name: cols.name, category: cols.category, icon: cols.icon, amountType: cols.amount_type,
+    expectedAmount: cols.expected_amount, currency: cols.currency, billingCycle: cols.billing_cycle,
+    billingInterval: cols.billing_interval, startDate: cols.start_date, nextDueDate: cols.next_due_date,
+    reminderDays: cols.reminder_days, notes: cols.notes ?? "",
+  });
+}
+
+function sameBill(a: BillColumns, b: BillColumns) {
+  return a.name === b.name && a.category === b.category && a.icon === b.icon && a.amount_type === b.amount_type &&
+    sameBillMoney(a.expected_amount, b.expected_amount) && a.currency === b.currency && a.billing_cycle === b.billing_cycle &&
+    a.billing_interval === b.billing_interval && a.billing_anchor_day === b.billing_anchor_day && a.start_date === b.start_date &&
+    a.next_due_date === b.next_due_date && a.reminder_days === b.reminder_days && a.lifecycle === b.lifecycle && a.notes === b.notes;
+}
+
+async function applyBill(supabase: ServerClient, userId: string, op: SyncOperation, editedAt: string): Promise<SyncOpResult> {
+  const { row, error } = await loadOwnRow(supabase, "bills", BILL_SELECT, userId, op.entityId);
+  if (error) return fromDbError(op, error, BILL_MIGRATION_MESSAGES);
+  if (op.op === "CREATE") {
+    if (row) return already(op, (row.updated_at as string) ?? null);
+    const cols = billColumns(pick(op.payload, BILL_FIELDS));
+    const invalid = billError(cols);
+    if (invalid) return rejected(op, invalid);
+    const createdAt = resolveEditedAt(String(op.payload.created_at ?? editedAt), new Date(editedAt));
+    const inserted = await supabase.from("bills").insert({ id: op.entityId, user_id: userId, ...cols, created_at: createdAt, updated_at: editedAt });
+    if (inserted.error) {
+      if (inserted.error.code === "23505") {
+        const again = await loadOwnRow(supabase, "bills", "id, updated_at", userId, op.entityId);
+        if (again.row) return already(op, (again.row.updated_at as string) ?? null);
+      }
+      return fromDbError(op, inserted.error, BILL_MIGRATION_MESSAGES);
+    }
+    return done(op, { serverUpdatedAt: editedAt });
+  }
+  if (op.op === "UPDATE") {
+    if (!row) return rejected(op, "This bill no longer exists.");
+    const current = billColumns(row);
+    const next = billColumns({ ...row, ...pick(op.payload, BILL_FIELDS) });
+    if (sameBill(current, next)) return already(op, (row.updated_at as string) ?? null);
+    const invalid = billError(next);
+    if (invalid) return rejected(op, invalid);
+    const lww = lastWriteWins(row.updated_at, op.baseUpdatedAt, editedAt);
+    if (!lww.apply) return done(op, { conflict: lww.conflict, serverUpdatedAt: (row.updated_at as string) ?? null });
+    const updated = await supabase.from("bills").update({ ...next, updated_at: editedAt }).eq("id", op.entityId).eq("user_id", userId).select("id").maybeSingle();
+    if (updated.error) return fromDbError(op, updated.error, BILL_MIGRATION_MESSAGES);
+    if (!updated.data) return rejected(op, "This bill no longer exists.");
+    return done(op, { conflict: lww.conflict, serverUpdatedAt: editedAt });
+  }
+  if (!row) return already(op, null);
+  const lww = lastWriteWins(row.updated_at, op.baseUpdatedAt, editedAt);
+  if (!lww.apply) return done(op, { conflict: lww.conflict, serverUpdatedAt: (row.updated_at as string) ?? null });
+  const removed = await supabase.from("bills").delete().eq("id", op.entityId).eq("user_id", userId).select("id").maybeSingle();
+  if (removed.error) return fromDbError(op, removed.error, BILL_MIGRATION_MESSAGES);
+  return done(op, { conflict: lww.conflict, serverUpdatedAt: null });
+}
+
+async function applyBillPayment(supabase: ServerClient, userId: string, op: SyncOperation, editedAt: string): Promise<SyncOpResult> {
+  const existingResult = await loadOwnRow(supabase, "bill_payments", BILL_PAYMENT_SELECT, userId, op.entityId);
+  if (existingResult.error) return fromDbError(op, existingResult.error, BILL_MIGRATION_MESSAGES);
+  const payment = existingResult.row;
+
+  if (op.op === "UPDATE") {
+    if (!payment) return rejected(op, "This bill payment no longer exists.");
+    const actual = roundAmount(Number(op.payload.actual_amount ?? payment.actual_amount));
+    const paymentDate = String(op.payload.payment_date ?? payment.payment_date);
+    const invalid = validateBillPayment(actual, paymentDate, String(payment.due_date));
+    if (invalid) return rejected(op, invalid);
+    if (toCents(actual) === toCents(Number(payment.actual_amount)) && paymentDate === payment.payment_date) return already(op, (payment.updated_at as string) ?? null);
+    const lww = lastWriteWins(payment.updated_at, op.baseUpdatedAt, editedAt);
+    if (!lww.apply) return done(op, { conflict: lww.conflict, serverUpdatedAt: (payment.updated_at as string) ?? null });
+    const updated = await supabase.from("bill_payments").update({ actual_amount: actual, payment_date: paymentDate, updated_at: editedAt })
+      .eq("id", op.entityId).eq("user_id", userId).select("id").maybeSingle();
+    if (updated.error) return fromDbError(op, updated.error, BILL_MIGRATION_MESSAGES);
+    return done(op, { conflict: lww.conflict, serverUpdatedAt: editedAt });
+  }
+
+  const billId = String(op.payload.bill_id ?? payment?.bill_id ?? "");
+  if (!UUID.test(billId)) return rejected(op, "This bill payment is invalid.");
+  const billResult = await loadOwnRow(supabase, "bills", BILL_SELECT, userId, billId);
+  if (billResult.error) return fromDbError(op, billResult.error, BILL_MIGRATION_MESSAGES);
+  const bill = billResult.row;
+
+  if (op.op === "DELETE") {
+    const dueDate = String(payment?.due_date ?? op.payload.due_date ?? "");
+    if (!payment) {
+      if (bill && isDateKey(dueDate) && isBillCycle(bill.billing_cycle)) {
+        const expectedNext = addBillCycle(dueDate, bill.billing_cycle, Number(bill.billing_interval), Number(bill.billing_anchor_day));
+        if (String(bill.next_due_date) === expectedNext) {
+          const rollback = await supabase.from("bills").update({ next_due_date: dueDate, updated_at: editedAt })
+            .eq("id", billId).eq("user_id", userId).select("id").maybeSingle();
+          if (rollback.error) return fromDbError(op, rollback.error, BILL_MIGRATION_MESSAGES);
+        }
+      }
+      return already(op, null);
+    }
+    const lww = lastWriteWins(payment.updated_at, op.baseUpdatedAt, editedAt);
+    if (!lww.apply) return done(op, { conflict: lww.conflict, serverUpdatedAt: (payment.updated_at as string) ?? null });
+    const removed = await supabase.from("bill_payments").delete().eq("id", op.entityId).eq("user_id", userId).select("id").maybeSingle();
+    if (removed.error) return fromDbError(op, removed.error, BILL_MIGRATION_MESSAGES);
+    if (bill && isBillCycle(bill.billing_cycle)) {
+      const expectedNext = addBillCycle(String(payment.due_date), bill.billing_cycle, Number(bill.billing_interval), Number(bill.billing_anchor_day));
+      if (String(bill.next_due_date) === expectedNext) {
+        const rollback = await supabase.from("bills").update({ next_due_date: payment.due_date, updated_at: editedAt })
+          .eq("id", billId).eq("user_id", userId).select("id").maybeSingle();
+        if (rollback.error) return fromDbError(op, rollback.error, BILL_MIGRATION_MESSAGES);
+      }
+    }
+    return done(op, { conflict: lww.conflict, serverUpdatedAt: null });
+  }
+
+  if (payment) {
+    if (bill && isBillCycle(bill.billing_cycle) && String(bill.next_due_date) === String(payment.due_date)) {
+      const nextDue = addBillCycle(String(payment.due_date), bill.billing_cycle, Number(bill.billing_interval), Number(bill.billing_anchor_day));
+      const advanced = await supabase.from("bills").update({ next_due_date: nextDue, updated_at: editedAt })
+        .eq("id", billId).eq("user_id", userId).select("id").maybeSingle();
+      if (advanced.error) return fromDbError(op, advanced.error, BILL_MIGRATION_MESSAGES);
+    }
+    return already(op, (payment.updated_at as string) ?? null);
+  }
+  if (!bill) return rejected(op, "This bill no longer exists.");
+  if (bill.lifecycle !== "active") return rejected(op, "Resume this bill before marking it paid.");
+  if (!isBillCycle(bill.billing_cycle)) return rejected(op, "This bill has an invalid billing frequency.");
+  const dueDate = String(op.payload.due_date ?? "");
+  const paymentDate = String(op.payload.payment_date ?? "");
+  const actual = roundAmount(Number(op.payload.actual_amount));
+  const invalid = validateBillPayment(actual, paymentDate, dueDate);
+  if (invalid) return rejected(op, invalid);
+  const duplicate = await supabase.from("bill_payments").select("id").eq("user_id", userId).eq("bill_id", billId).eq("due_date", dueDate).maybeSingle();
+  if (duplicate.error) return fromDbError(op, duplicate.error, BILL_MIGRATION_MESSAGES);
+  if (duplicate.data) return rejected(op, "This billing cycle is already paid.");
+  const paidAt = resolveEditedAt(String(op.payload.paid_at ?? editedAt), new Date(editedAt));
+  const inserted = await supabase.from("bill_payments").insert({
+    id: op.entityId, user_id: userId, bill_id: billId, due_date: dueDate,
+    expected_amount: bill.expected_amount, actual_amount: actual, payment_date: paymentDate,
+    paid_at: paidAt, status: "paid", created_at: paidAt, updated_at: editedAt,
+  });
+  if (inserted.error) return fromDbError(op, inserted.error, BILL_MIGRATION_MESSAGES);
+  if (String(bill.next_due_date) === dueDate) {
+    const nextDue = addBillCycle(dueDate, bill.billing_cycle, Number(bill.billing_interval), Number(bill.billing_anchor_day));
+    const advanced = await supabase.from("bills").update({ next_due_date: nextDue, updated_at: editedAt })
+      .eq("id", billId).eq("user_id", userId).select("id").maybeSingle();
+    if (advanced.error) return fromDbError(op, advanced.error, BILL_MIGRATION_MESSAGES);
+  }
+  return done(op, { serverUpdatedAt: editedAt });
 }

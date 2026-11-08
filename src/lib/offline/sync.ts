@@ -273,6 +273,8 @@ async function settle(batch: OutboxEntry[], results: SyncOpResult[]) {
     offlineDb.dailyBudgetExpenses,
     offlineDb.subscriptions,
     offlineDb.subscriptionPayments,
+    offlineDb.bills,
+    offlineDb.billPayments,
   ];
   await offlineDb.transaction("rw", tables, async () => {
     for (const entry of batch) {
@@ -378,6 +380,10 @@ async function recordServerVersion(entry: OutboxEntry, serverUpdatedAt: string) 
     await offlineDb.subscriptions.update([entry.ownerId, entry.entityId], { updated_at: serverUpdatedAt });
   } else if (entry.entity === "subscription_payment") {
     await offlineDb.subscriptionPayments.update([entry.ownerId, entry.entityId], { updated_at: serverUpdatedAt });
+  } else if (entry.entity === "bill") {
+    await offlineDb.bills.update([entry.ownerId, entry.entityId], { updated_at: serverUpdatedAt });
+  } else if (entry.entity === "bill_payment") {
+    await offlineDb.billPayments.update([entry.ownerId, entry.entityId], { updated_at: serverUpdatedAt });
   }
   // Categories have no updated_at.
 }

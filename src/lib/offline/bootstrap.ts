@@ -3,6 +3,7 @@ import "client-only";
 import type { User } from "@supabase/supabase-js";
 import { normalizeAccountGroup } from "@/lib/accounts";
 import { normalizeIncludeInSummary } from "@/lib/accountSummary";
+import type { BillPaymentRecord, BillRecord } from "@/lib/bills";
 import { offlineDb, type LocalSyncMeta, type LocalVerificationTotals } from "@/lib/offline/db";
 import { overlayOutbox } from "@/lib/offline/snapshotOverlay";
 import { createClient } from "@/lib/supabase/client";
@@ -155,6 +156,10 @@ export const SUBSCRIPTION_SNAPSHOT_COLUMNS =
   "id, user_id, name, icon, amount, currency, billing_cycle, billing_anchor_day, start_date, next_payment_date, lifecycle, notes, created_at, updated_at";
 export const SUBSCRIPTION_PAYMENT_SNAPSHOT_COLUMNS =
   "id, user_id, subscription_id, due_date, paid_at, created_at, updated_at";
+export const BILL_SNAPSHOT_COLUMNS =
+  "id, user_id, name, category, icon, amount_type, expected_amount, currency, billing_cycle, billing_interval, billing_anchor_day, start_date, next_due_date, reminder_days, lifecycle, notes, created_at, updated_at";
+export const BILL_PAYMENT_SNAPSHOT_COLUMNS =
+  "id, user_id, bill_id, due_date, expected_amount, actual_amount, payment_date, paid_at, status, created_at, updated_at";
 
 async function fetchEveryPage<T>(
   label: string,
@@ -336,13 +341,33 @@ async function downloadSnapshot(user: User) {
     }
   );
 
-  const [profileResult, accounts, categories, budget, dailyBudget, subscriptions] = await Promise.all([
+  const isMissingBillsTable = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    return [...MISSING_OBJECT_CODES].some((code) => message.includes(code)) || message.includes("bills") || message.includes("bill_payments");
+  };
+  const billsPromise = Promise.all([
+    fetchEveryPage<BillRecord>("Bills", (from, to) =>
+      supabase.from("bills").select(BILL_SNAPSHOT_COLUMNS).eq("user_id", user.id).order("id").range(from, to)
+    ),
+    fetchEveryPage<BillPaymentRecord>("Bill payments", (from, to) =>
+      supabase.from("bill_payments").select(BILL_PAYMENT_SNAPSHOT_COLUMNS).eq("user_id", user.id).order("id").range(from, to)
+    ),
+  ]).then(
+    ([rows, payments]) => ({ rows, payments, available: true }),
+    (error: unknown) => {
+      if (isMissingBillsTable(error)) return { rows: [] as BillRecord[], payments: [] as BillPaymentRecord[], available: false };
+      throw error;
+    }
+  );
+
+  const [profileResult, accounts, categories, budget, dailyBudget, subscriptions, bills] = await Promise.all([
     profilePromise,
     accountsPromise,
     categoriesPromise,
     budgetPromise,
     dailyBudgetPromise,
     subscriptionsPromise,
+    billsPromise,
   ]);
   if (profileResult.error) throw new Error(`Profile: ${profileResult.error.message}`);
 
@@ -371,7 +396,7 @@ async function downloadSnapshot(user: User) {
     default_currency: "USD",
   };
 
-  return { profile, accounts, categories, transactions, budget, dailyBudget, subscriptions };
+  return { profile, accounts, categories, transactions, budget, dailyBudget, subscriptions, bills };
 }
 
 async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof downloadSnapshot>>) {
@@ -390,6 +415,8 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
       offlineDb.dailyBudgetExpenses,
       offlineDb.subscriptions,
       offlineDb.subscriptionPayments,
+      offlineDb.bills,
+      offlineDb.billPayments,
       offlineDb.syncMeta,
       offlineDb.outbox,
     ],
@@ -406,6 +433,8 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
         previousDailyExpenses,
         previousSubscriptions,
         previousSubscriptionPayments,
+        previousBills,
+        previousBillPayments,
         outbox,
       ] = await Promise.all([
         offlineDb.accounts.where("ownerId").equals(ownerId).toArray(),
@@ -416,6 +445,8 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
         offlineDb.dailyBudgetExpenses.where("ownerId").equals(ownerId).toArray(),
         offlineDb.subscriptions.where("ownerId").equals(ownerId).toArray(),
         offlineDb.subscriptionPayments.where("ownerId").equals(ownerId).toArray(),
+        offlineDb.bills.where("ownerId").equals(ownerId).toArray(),
+        offlineDb.billPayments.where("ownerId").equals(ownerId).toArray(),
         offlineDb.outbox.where("ownerId").equals(ownerId).sortBy("seq"),
       ]);
 
@@ -445,6 +476,8 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
           dailyExpenses: snapshot.dailyBudget.expenses.map((expense) => ({ ownerId, ...expense })),
           subscriptions: snapshot.subscriptions.rows.map((subscription) => ({ ownerId, ...subscription })),
           subscriptionPayments: snapshot.subscriptions.payments.map((payment) => ({ ownerId, ...payment })),
+          bills: snapshot.bills.rows.map((bill) => ({ ownerId, ...bill })),
+          billPayments: snapshot.bills.payments.map((payment) => ({ ownerId, ...payment })),
         },
         {
           accounts: previousAccounts,
@@ -455,6 +488,8 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
           dailyExpenses: previousDailyExpenses,
           subscriptions: previousSubscriptions,
           subscriptionPayments: previousSubscriptionPayments,
+          bills: previousBills,
+          billPayments: previousBillPayments,
         },
         outbox
       );
@@ -467,6 +502,8 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
         offlineDb.dailyBudgetExpenses.where("ownerId").equals(ownerId).delete(),
         offlineDb.subscriptions.where("ownerId").equals(ownerId).delete(),
         offlineDb.subscriptionPayments.where("ownerId").equals(ownerId).delete(),
+        offlineDb.bills.where("ownerId").equals(ownerId).delete(),
+        offlineDb.billPayments.where("ownerId").equals(ownerId).delete(),
       ]);
       await offlineDb.profiles.delete(ownerId);
       await offlineDb.monthlyBudgets.delete(ownerId);
@@ -491,6 +528,8 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
       await offlineDb.dailyBudgetExpenses.bulkPut(localRows.dailyExpenses ?? []);
       await offlineDb.subscriptions.bulkPut(localRows.subscriptions ?? []);
       await offlineDb.subscriptionPayments.bulkPut(localRows.subscriptionPayments ?? []);
+      await offlineDb.bills.bulkPut(localRows.bills ?? []);
+      await offlineDb.billPayments.bulkPut(localRows.billPayments ?? []);
 
       const [localAccounts, localTransactions] = await Promise.all([
         offlineDb.accounts.where("ownerId").equals(ownerId).toArray(),
@@ -509,6 +548,7 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
         budgetAvailable: snapshot.budget.available,
         dailyBudgetAvailable: snapshot.dailyBudget.available,
         subscriptionsAvailable: snapshot.subscriptions.available,
+        billsAvailable: snapshot.bills.available,
         server: serverTotals,
         local: localTotals,
         totalsMatch,

@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  FileClock,
   Home,
   ReceiptText,
   Repeat2,
@@ -21,6 +22,7 @@ export const DESKTOP_NAV_ITEMS: NavItem[] = [
   { label: "Transactions", href: "/transactions", icon: ReceiptText },
   { label: "Categories", href: "/categories", icon: Tags },
   { label: "Subscriptions", href: "/subscriptions", icon: Repeat2 },
+  { label: "Bills", href: "/bills", icon: FileClock },
   { label: "Reports", href: "/reports", icon: BarChart3 },
   { label: "Trash", href: "/trash", icon: Trash2 },
   { label: "Settings", href: "/settings", icon: Settings },
@@ -41,6 +43,7 @@ export const MOBILE_RIGHT_NAV_ITEMS: NavItem[] = [
 export const MORE_NAV_ITEMS: NavItem[] = [
   { label: "Categories", href: "/categories", icon: Tags },
   { label: "Subscriptions", href: "/subscriptions", icon: Repeat2 },
+  { label: "Bills", href: "/bills", icon: FileClock },
   { label: "Settings", href: "/settings", icon: Settings },
   { label: "Trash", href: "/trash", icon: Trash2 },
 ];

@@ -7,6 +7,8 @@ import type {
   LocalTransaction,
   LocalSubscription,
   LocalSubscriptionPayment,
+  LocalBill,
+  LocalBillPayment,
   OutboxEntry,
 } from "./db";
 import { isAmbiguousLegacyTransactionDateUpdate } from "@/lib/transactions";
@@ -21,6 +23,8 @@ export interface LocalSnapshotRows {
   dailyExpenses?: LocalDailyBudgetExpense[];
   subscriptions?: LocalSubscription[];
   subscriptionPayments?: LocalSubscriptionPayment[];
+  bills?: LocalBill[];
+  billPayments?: LocalBillPayment[];
 }
 
 function byId<T extends { id: string }>(rows: T[]) {
@@ -51,6 +55,10 @@ export function overlayOutbox(
   const previousSubscriptions = byId(previous.subscriptions ?? []);
   const subscriptionPayments = byId(server.subscriptionPayments ?? []);
   const previousSubscriptionPayments = byId(previous.subscriptionPayments ?? []);
+  const bills = byId(server.bills ?? []);
+  const previousBills = byId(previous.bills ?? []);
+  const billPayments = byId(server.billPayments ?? []);
+  const previousBillPayments = byId(previous.billPayments ?? []);
 
   for (const entry of [...entries].sort((left, right) => (left.seq ?? 0) - (right.seq ?? 0))) {
     if (entry.ownerId !== ownerId) continue;
@@ -204,6 +212,35 @@ export function overlayOutbox(
       continue;
     }
 
+    if (entry.entity === "bill") {
+      if (entry.op === "DELETE") {
+        bills.delete(entry.entityId);
+        for (const [id, payment] of billPayments) if (payment.bill_id === entry.entityId) billPayments.delete(id);
+        continue;
+      }
+      const base = bills.get(entry.entityId) ?? previousBills.get(entry.entityId);
+      if (base || entry.op === "CREATE") {
+        bills.set(entry.entityId, { ...(base ?? ({} as LocalBill)), ...entry.payload, ownerId, id: entry.entityId, user_id: ownerId } as LocalBill);
+      }
+      continue;
+    }
+
+    if (entry.entity === "bill_payment") {
+      const payload = entry.payload;
+      const billId = String(payload.bill_id ?? "");
+      if (entry.op === "DELETE") {
+        billPayments.delete(entry.entityId);
+        const bill = bills.get(billId) ?? previousBills.get(billId);
+        if (bill && typeof payload.rollback_due_date === "string") bills.set(billId, { ...bill, next_due_date: payload.rollback_due_date } as LocalBill);
+        continue;
+      }
+      const base = billPayments.get(entry.entityId) ?? previousBillPayments.get(entry.entityId);
+      billPayments.set(entry.entityId, { ...(base ?? ({} as LocalBillPayment)), ...payload, ownerId, id: entry.entityId, user_id: ownerId } as LocalBillPayment);
+      const bill = bills.get(billId) ?? previousBills.get(billId);
+      if (bill && typeof payload.next_due_date === "string") bills.set(billId, { ...bill, next_due_date: payload.next_due_date } as LocalBill);
+      continue;
+    }
+
     if (entry.op === "DELETE") {
       budget = null;
     } else {
@@ -226,5 +263,7 @@ export function overlayOutbox(
     dailyExpenses: [...dailyExpenses.values()],
     subscriptions: [...subscriptions.values()],
     subscriptionPayments: [...subscriptionPayments.values()],
+    bills: [...bills.values()],
+    billPayments: [...billPayments.values()],
   };
 }
