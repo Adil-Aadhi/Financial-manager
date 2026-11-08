@@ -275,6 +275,8 @@ async function settle(batch: OutboxEntry[], results: SyncOpResult[]) {
     offlineDb.subscriptionPayments,
     offlineDb.bills,
     offlineDb.billPayments,
+    offlineDb.installmentPlans,
+    offlineDb.installmentPayments,
   ];
   await offlineDb.transaction("rw", tables, async () => {
     for (const entry of batch) {
@@ -384,6 +386,20 @@ async function recordServerVersion(entry: OutboxEntry, serverUpdatedAt: string) 
     await offlineDb.bills.update([entry.ownerId, entry.entityId], { updated_at: serverUpdatedAt });
   } else if (entry.entity === "bill_payment") {
     await offlineDb.billPayments.update([entry.ownerId, entry.entityId], { updated_at: serverUpdatedAt });
+  } else if (entry.entity === "installment_plan") {
+    await offlineDb.installmentPlans.update([entry.ownerId, entry.entityId], { updated_at: serverUpdatedAt });
+  } else if (entry.entity === "installment_payment") {
+    await offlineDb.installmentPayments.update([entry.ownerId, entry.entityId], { updated_at: serverUpdatedAt });
+    // The expense this payment created was written with the same server timestamp.
+    if (entry.payload.transaction_origin === "created" && typeof entry.payload.transaction_id === "string") {
+      const pendingEdits = await offlineDb.outbox
+        .where("[ownerId+entity+entityId]")
+        .equals([entry.ownerId, "transaction", entry.payload.transaction_id])
+        .count();
+      if (pendingEdits === 0) {
+        await offlineDb.transactions.update([entry.ownerId, entry.payload.transaction_id], { updated_at: serverUpdatedAt });
+      }
+    }
   }
   // Categories have no updated_at.
 }

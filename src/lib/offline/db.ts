@@ -3,6 +3,7 @@ import "client-only";
 import Dexie, { type EntityTable, type Table } from "dexie";
 import type { AccountGroup } from "@/lib/accounts";
 import type { BillAmountType, BillCategory, BillCycle, BillIconName, BillLifecycle } from "@/lib/bills";
+import type { InstallmentPaymentRecord, InstallmentPlanRecord } from "@/lib/installments";
 import type { BillingCycle, SubscriptionIconName, SubscriptionLifecycle } from "@/lib/subscriptions";
 import type { SyncReviewReason, TransactionDateIntent } from "@/lib/sync/types";
 
@@ -160,6 +161,10 @@ export interface LocalBillPayment {
   updated_at?: string | null;
 }
 
+/** Installments Tracker rows: the server columns plus the device owner. */
+export type LocalInstallmentPlan = InstallmentPlanRecord & { ownerId: string };
+export type LocalInstallmentPayment = InstallmentPaymentRecord & { ownerId: string };
+
 export interface LocalVerificationTotals {
   accounts: number;
   transactions: number;
@@ -180,6 +185,8 @@ export interface LocalSyncMeta {
   subscriptionsAvailable?: boolean;
   /** Missing until a snapshot from a Bills-aware client has completed. */
   billsAvailable?: boolean;
+  /** Missing until a snapshot from an Installments-aware client has completed. */
+  installmentsAvailable?: boolean;
   server: LocalVerificationTotals;
   local: LocalVerificationTotals;
   totalsMatch: boolean;
@@ -195,7 +202,9 @@ export type OutboxEntity =
   | "subscription"
   | "subscription_payment"
   | "bill"
-  | "bill_payment";
+  | "bill_payment"
+  | "installment_plan"
+  | "installment_payment";
 export type OutboxOperation = "CREATE" | "UPDATE" | "DELETE";
 /** Phase 1 only writes "pending". Phase 2's sync engine moves ops through the others. */
 export type OutboxStatus = "pending" | "syncing" | "failed";
@@ -261,6 +270,8 @@ class FinanceOfflineDatabase extends Dexie {
   subscriptionPayments!: Table<LocalSubscriptionPayment, [string, string]>;
   bills!: Table<LocalBill, [string, string]>;
   billPayments!: Table<LocalBillPayment, [string, string]>;
+  installmentPlans!: Table<LocalInstallmentPlan, [string, string]>;
+  installmentPayments!: Table<LocalInstallmentPayment, [string, string]>;
   syncMeta!: EntityTable<LocalSyncMeta, "ownerId">;
   outbox!: EntityTable<OutboxEntry, "seq">;
   syncConflicts!: EntityTable<SyncConflictRecord, "id">;
@@ -298,6 +309,12 @@ class FinanceOfflineDatabase extends Dexie {
     this.version(6).stores({
       bills: "&[ownerId+id], ownerId, [ownerId+lifecycle], [ownerId+next_due_date], [ownerId+category]",
       billPayments: "&[ownerId+id], ownerId, [ownerId+bill_id], [ownerId+bill_id+due_date], [ownerId+payment_date]",
+    });
+    // v7 adds only the isolated Installments Tracker tables; every existing table is unchanged.
+    this.version(7).stores({
+      installmentPlans: "&[ownerId+id], ownerId, [ownerId+lifecycle]",
+      installmentPayments:
+        "&[ownerId+id], ownerId, [ownerId+installment_plan_id], [ownerId+installment_plan_id+installment_number], [ownerId+transaction_id]",
     });
   }
 }

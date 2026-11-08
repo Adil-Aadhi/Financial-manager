@@ -24,6 +24,24 @@ import {
   validateDailyExpenseInput,
   validateDailyLimitInput,
 } from "@/lib/dailyBudget";
+import {
+  INSTALLMENT_CATEGORY_NAME,
+  INSTALLMENT_MANAGED_MESSAGE,
+  closureExpectedCents,
+  coverageError,
+  computeFinancials,
+  installmentTransactionDescription,
+  isInstallmentCycle,
+  isInstallmentLifecycle,
+  settledLifecycle,
+  validatePaymentFields,
+  validatePlanAgainstPayments,
+  validatePlanInput,
+  type InstallmentPaymentKind,
+  type InstallmentPaymentMethod,
+  type InstallmentPlanInput,
+  type InstallmentTransactionOrigin,
+} from "@/lib/installments";
 import type { createClient } from "@/lib/supabase/server";
 import {
   addBillingCycle,
@@ -33,7 +51,7 @@ import {
   sameMoney,
   validateSubscriptionInput,
 } from "@/lib/subscriptions";
-import { countCategoryUsage, validateTransactionInput } from "@/lib/server/validation";
+import { countCategoryUsage, isInstallmentManagedTransaction, validateTransactionInput } from "@/lib/server/validation";
 import {
   isAmbiguousLegacyTransactionDateUpdate,
   normalizeTransactionDate,
@@ -125,7 +143,7 @@ function isOperationShape(op: SyncOperation) {
     !!op &&
     typeof op.opId === "string" &&
     typeof op.ownerId === "string" &&
-    ["transaction", "account", "category", "budget", "daily_expense", "daily_limit", "subscription", "subscription_payment", "bill", "bill_payment"].includes(op.entity) &&
+    ["transaction", "account", "category", "budget", "daily_expense", "daily_limit", "subscription", "subscription_payment", "bill", "bill_payment", "installment_plan", "installment_payment"].includes(op.entity) &&
     ["CREATE", "UPDATE", "DELETE"].includes(op.op) &&
     typeof op.entityId === "string" &&
     (op.entity === "budget"
@@ -222,6 +240,10 @@ async function applyOne(supabase: ServerClient, userId: string, op: SyncOperatio
       return applyBill(supabase, userId, op, editedAt);
     case "bill_payment":
       return applyBillPayment(supabase, userId, op, editedAt);
+    case "installment_plan":
+      return applyInstallmentPlan(supabase, userId, op, editedAt);
+    case "installment_payment":
+      return applyInstallmentPayment(supabase, userId, op, editedAt);
   }
 }
 
@@ -278,6 +300,16 @@ async function loadOwnRow(supabase: ServerClient, table: string, select: string,
   return { row: (data as Row | null) ?? null, error: error as DbError };
 }
 
+/**
+ * Installment-generated expenses can only change through their installment payment (the database
+ * trigger enforces the same rule). Returns the refusal, or null when the transaction is ordinary.
+ */
+async function managedTransactionRefusal(supabase: ServerClient, userId: string, op: SyncOperation): Promise<SyncOpResult | null> {
+  const managed = await isInstallmentManagedTransaction(supabase, userId, op.entityId);
+  if (managed === "error") return { opId: op.opId, status: "retry", error: "Unable to check whether this expense is managed by Installments." };
+  return managed ? rejected(op, INSTALLMENT_MANAGED_MESSAGE) : null;
+}
+
 async function applyTransaction(supabase: ServerClient, userId: string, op: SyncOperation, editedAt: string): Promise<SyncOpResult> {
   const { row, error } = await loadOwnRow(supabase, "transactions", TRANSACTION_SELECT, userId, op.entityId);
   if (error) return fromDbError(op, error);
@@ -317,6 +349,8 @@ async function applyTransaction(supabase: ServerClient, userId: string, op: Sync
     if (op.transactionDateIntent === "unchanged") delete picked.transaction_date;
     const next = transactionColumns({ ...row, ...picked });
     if (sameTransaction(current, next)) return already(op, (row.updated_at as string) ?? null);
+    const managedUpdate = await managedTransactionRefusal(supabase, userId, op);
+    if (managedUpdate) return managedUpdate;
     const lww = lastWriteWins(row.updated_at, op.baseUpdatedAt, editedAt);
     if (!lww.apply) return done(op, { conflict: lww.conflict, serverUpdatedAt: (row.updated_at as string) ?? null });
     const invalid = await validateTransactionColumns(supabase, userId, next);
@@ -337,6 +371,8 @@ async function applyTransaction(supabase: ServerClient, userId: string, op: Sync
 
   // DELETE
   if (!row) return already(op, null);
+  const managedDelete = await managedTransactionRefusal(supabase, userId, op);
+  if (managedDelete) return managedDelete;
   const lww = lastWriteWins(row.updated_at, op.baseUpdatedAt, editedAt);
   if (!lww.apply) return done(op, { conflict: lww.conflict, serverUpdatedAt: (row.updated_at as string) ?? null });
   const removed = await supabase.from("transactions").delete().eq("id", op.entityId).eq("user_id", userId).select("id").maybeSingle();
@@ -1093,4 +1129,358 @@ async function applyBillPayment(supabase: ServerClient, userId: string, op: Sync
     if (advanced.error) return fromDbError(op, advanced.error, BILL_MIGRATION_MESSAGES);
   }
   return done(op, { serverUpdatedAt: editedAt });
+}
+
+/* ------------------------------------------------------------------ installments tracker */
+
+const INSTALLMENT_MIGRATION_MESSAGE = "Run the Installments migration before using installments.";
+const INSTALLMENT_MIGRATION_MESSAGES = {
+  "42P01": INSTALLMENT_MIGRATION_MESSAGE,
+  "42703": INSTALLMENT_MIGRATION_MESSAGE,
+  "42883": INSTALLMENT_MIGRATION_MESSAGE,
+  PGRST202: INSTALLMENT_MIGRATION_MESSAGE,
+  PGRST205: INSTALLMENT_MIGRATION_MESSAGE,
+};
+export const INSTALLMENT_PLAN_SELECT =
+  "id, user_id, name, description, plan_type, provider, product_category, icon, original_amount, down_payment, financed_amount, interest_amount, additional_fees, total_repayment_amount, currency, installment_count, default_installment_amount, billing_cycle, billing_interval, start_date, first_due_date, reminder_days, lifecycle, notes, created_at, updated_at";
+export const INSTALLMENT_PAYMENT_SELECT =
+  "id, user_id, installment_plan_id, installment_number, kind, covers_through, due_date, expected_amount, actual_amount, payment_date, payment_method, account_id, transaction_id, transaction_origin, notes, paid_at, created_at, updated_at";
+const INSTALLMENT_PLAN_FIELDS = [
+  "name", "description", "plan_type", "provider", "product_category", "icon", "original_amount", "down_payment",
+  "interest_amount", "additional_fees", "currency", "installment_count", "default_installment_amount", "billing_cycle",
+  "billing_interval", "start_date", "first_due_date", "reminder_days", "lifecycle", "notes",
+] as const;
+const INSTALLMENT_PAYMENT_FIELDS = [
+  "installment_plan_id", "installment_number", "kind", "covers_through", "actual_amount", "payment_date",
+  "payment_method", "account_id", "transaction_id", "transaction_origin", "notes", "paid_at", "transaction_time",
+] as const;
+
+function planInputFromRow(source: Row): InstallmentPlanInput {
+  const text = (value: unknown) => (typeof value === "string" ? value : "");
+  const cycle = String(source.billing_cycle ?? "");
+  return {
+    name: text(source.name),
+    description: text(source.description),
+    planType: String(source.plan_type ?? "") as InstallmentPlanInput["planType"],
+    provider: text(source.provider),
+    productCategory: String(source.product_category ?? "") as InstallmentPlanInput["productCategory"],
+    icon: String(source.icon ?? "") as InstallmentPlanInput["icon"],
+    originalAmount: Number(source.original_amount),
+    downPayment: Number(source.down_payment ?? 0),
+    interestAmount: Number(source.interest_amount ?? 0),
+    additionalFees: Number(source.additional_fees ?? 0),
+    currency: String(source.currency ?? "").toUpperCase(),
+    installmentCount: Number(source.installment_count),
+    defaultInstallmentAmount: Number(source.default_installment_amount),
+    billingCycle: cycle as InstallmentPlanInput["billingCycle"],
+    billingInterval: cycle.startsWith("custom_") ? Number(source.billing_interval) : 1,
+    startDate: String(source.start_date ?? ""),
+    firstDueDate: String(source.first_due_date ?? ""),
+    reminderDays: Number(source.reminder_days),
+    notes: text(source.notes),
+  };
+}
+
+/** Columns written for a plan. Financed and total amounts are always recomputed here. */
+function planColumnsFromInput(input: InstallmentPlanInput) {
+  const financials = computeFinancials(input);
+  return {
+    name: input.name.trim(),
+    description: input.description.trim() || null,
+    plan_type: input.planType,
+    provider: input.provider.trim(),
+    product_category: input.productCategory,
+    icon: input.icon,
+    original_amount: roundAmount(input.originalAmount),
+    down_payment: roundAmount(input.downPayment),
+    financed_amount: financials.financedCents / 100,
+    interest_amount: roundAmount(input.interestAmount),
+    additional_fees: roundAmount(input.additionalFees),
+    total_repayment_amount: financials.totalCents / 100,
+    currency: input.currency,
+    installment_count: input.installmentCount,
+    default_installment_amount: roundAmount(input.defaultInstallmentAmount),
+    billing_cycle: input.billingCycle,
+    billing_interval: input.billingInterval,
+    start_date: input.startDate,
+    first_due_date: input.firstDueDate,
+    reminder_days: input.reminderDays,
+    notes: input.notes.trim() || null,
+  };
+}
+
+function samePlan(a: ReturnType<typeof planColumnsFromInput> & { lifecycle: string }, b: ReturnType<typeof planColumnsFromInput> & { lifecycle: string }) {
+  return (Object.keys(a) as (keyof typeof a)[]).every((key) => {
+    const left = a[key];
+    const right = b[key];
+    if (typeof left === "number" || typeof right === "number") return toCents(left as number) === toCents(right as number);
+    return left === right;
+  });
+}
+
+async function loadPlanPayments(supabase: ServerClient, userId: string, planId: string) {
+  const { data, error } = await supabase
+    .from("installment_payments")
+    .select("id, installment_number, kind, covers_through, actual_amount")
+    .eq("user_id", userId)
+    .eq("installment_plan_id", planId);
+  return {
+    payments: (data ?? []) as Array<{ id: string; installment_number: number; kind: InstallmentPaymentKind; covers_through: number; actual_amount: number | string }>,
+    error: error as DbError,
+  };
+}
+
+async function applyInstallmentPlan(supabase: ServerClient, userId: string, op: SyncOperation, editedAt: string): Promise<SyncOpResult> {
+  const { row, error } = await loadOwnRow(supabase, "installment_plans", INSTALLMENT_PLAN_SELECT, userId, op.entityId);
+  if (error) return fromDbError(op, error, INSTALLMENT_MIGRATION_MESSAGES);
+
+  if (op.op === "CREATE") {
+    if (row) return already(op, (row.updated_at as string) ?? null);
+    const input = planInputFromRow(pick(op.payload, INSTALLMENT_PLAN_FIELDS));
+    const invalid = validatePlanInput(input);
+    if (invalid) return rejected(op, invalid);
+    const createdAt = resolveEditedAt(String(op.payload.created_at ?? editedAt), new Date(editedAt));
+    const inserted = await supabase.from("installment_plans").insert({
+      id: op.entityId,
+      user_id: userId,
+      ...planColumnsFromInput(input),
+      lifecycle: "active",
+      created_at: createdAt,
+      updated_at: editedAt,
+    });
+    if (inserted.error) {
+      if (inserted.error.code === "23505") {
+        const again = await loadOwnRow(supabase, "installment_plans", "id, updated_at", userId, op.entityId);
+        if (again.row) return already(op, (again.row.updated_at as string) ?? null);
+      }
+      return fromDbError(op, inserted.error, INSTALLMENT_MIGRATION_MESSAGES);
+    }
+    return done(op, { serverUpdatedAt: editedAt });
+  }
+
+  if (op.op === "UPDATE") {
+    if (!row) return rejected(op, "This installment plan no longer exists.");
+    const currentInput = planInputFromRow(row);
+    const nextInput = planInputFromRow({ ...row, ...pick(op.payload, INSTALLMENT_PLAN_FIELDS) });
+    const requested = op.payload.lifecycle !== undefined ? String(op.payload.lifecycle) : String(row.lifecycle);
+    if (!isInstallmentLifecycle(requested)) return rejected(op, "Choose a valid plan state.");
+    const { payments, error: paymentsError } = await loadPlanPayments(supabase, userId, op.entityId);
+    if (paymentsError) return fromDbError(op, paymentsError, INSTALLMENT_MIGRATION_MESSAGES);
+    const lifecycle = settledLifecycle(requested === "completed" ? "active" : requested, nextInput.installmentCount, payments);
+    const current = { ...planColumnsFromInput(currentInput), lifecycle: String(row.lifecycle) };
+    const next = { ...planColumnsFromInput(nextInput), lifecycle };
+    if (samePlan(current, next)) return already(op, (row.updated_at as string) ?? null);
+    const invalid = validatePlanInput(nextInput) ?? validatePlanAgainstPayments(nextInput.installmentCount, payments);
+    if (invalid) return rejected(op, invalid);
+    const lww = lastWriteWins(row.updated_at, op.baseUpdatedAt, editedAt);
+    if (!lww.apply) return done(op, { conflict: lww.conflict, serverUpdatedAt: (row.updated_at as string) ?? null });
+    const updated = await supabase
+      .from("installment_plans")
+      .update({ ...next, updated_at: editedAt })
+      .eq("id", op.entityId)
+      .eq("user_id", userId)
+      .select("id")
+      .maybeSingle();
+    if (updated.error) return fromDbError(op, updated.error, INSTALLMENT_MIGRATION_MESSAGES);
+    if (!updated.data) return rejected(op, "This installment plan no longer exists.");
+    return done(op, { conflict: lww.conflict, serverUpdatedAt: editedAt });
+  }
+
+  // DELETE: payments cascade with the plan; recorded expense transactions are kept.
+  if (!row) return already(op, null);
+  const lww = lastWriteWins(row.updated_at, op.baseUpdatedAt, editedAt);
+  if (!lww.apply) return done(op, { conflict: lww.conflict, serverUpdatedAt: (row.updated_at as string) ?? null });
+  const removed = await supabase.from("installment_plans").delete().eq("id", op.entityId).eq("user_id", userId).select("id").maybeSingle();
+  if (removed.error) return fromDbError(op, removed.error, INSTALLMENT_MIGRATION_MESSAGES);
+  return done(op, { conflict: lww.conflict, serverUpdatedAt: null });
+}
+
+function paymentColumns(source: Row) {
+  const nullableId = (value: unknown) => (typeof value === "string" && value ? value : null);
+  const time = typeof source.transaction_time === "string" ? source.transaction_time.slice(0, 5) : "";
+  return {
+    installment_plan_id: String(source.installment_plan_id ?? ""),
+    installment_number: Number(source.installment_number),
+    kind: String(source.kind ?? "installment") as InstallmentPaymentKind,
+    covers_through: Number(source.covers_through ?? source.installment_number),
+    actual_amount: roundAmount(Number(source.actual_amount)),
+    payment_date: String(source.payment_date ?? ""),
+    payment_method: String(source.payment_method ?? "") as InstallmentPaymentMethod,
+    account_id: nullableId(source.account_id),
+    transaction_id: nullableId(source.transaction_id),
+    transaction_origin: (nullableId(source.transaction_origin) as InstallmentTransactionOrigin | null),
+    notes: typeof source.notes === "string" && source.notes.trim() ? source.notes.trim() : null,
+    transaction_time: time,
+  };
+}
+
+function samePayment(a: ReturnType<typeof paymentColumns>, b: ReturnType<typeof paymentColumns>) {
+  return (
+    a.installment_number === b.installment_number &&
+    a.kind === b.kind &&
+    a.covers_through === b.covers_through &&
+    toCents(a.actual_amount) === toCents(b.actual_amount) &&
+    a.payment_date === b.payment_date &&
+    a.payment_method === b.payment_method &&
+    a.account_id === b.account_id &&
+    a.transaction_id === b.transaction_id &&
+    a.transaction_origin === b.transaction_origin &&
+    a.notes === b.notes
+  );
+}
+
+async function installmentCategoryIdOnServer(supabase: ServerClient) {
+  const { data, error } = await supabase
+    .from("categories")
+    .select("id, name")
+    .eq("is_default", true)
+    .eq("type", "expense")
+    .ilike("name", INSTALLMENT_CATEGORY_NAME);
+  if (error) return { id: null, error: error as DbError };
+  const match = ((data ?? []) as Array<{ id: string; name: string }>).find(
+    (category) => category.name.trim().toLowerCase() === INSTALLMENT_CATEGORY_NAME.toLowerCase()
+  );
+  return { id: match?.id ?? null, error: null };
+}
+
+const PAYMENT_UNIQUE_MESSAGES = (number: number) => ({
+  ...INSTALLMENT_MIGRATION_MESSAGES,
+  "23505": `Installment ${number} already has a payment, or that transaction already records another payment.`,
+});
+
+async function applyInstallmentPayment(supabase: ServerClient, userId: string, op: SyncOperation, editedAt: string): Promise<SyncOpResult> {
+  const { row, error } = await loadOwnRow(supabase, "installment_payments", INSTALLMENT_PAYMENT_SELECT, userId, op.entityId);
+  if (error) return fromDbError(op, error, INSTALLMENT_MIGRATION_MESSAGES);
+
+  if (op.op === "DELETE") {
+    // A retried undo finds nothing: the payment and the expense it created went together.
+    if (!row) return already(op, null);
+    const lww = lastWriteWins(row.updated_at, op.baseUpdatedAt, editedAt);
+    if (!lww.apply) return done(op, { conflict: lww.conflict, serverUpdatedAt: (row.updated_at as string) ?? null });
+    const removed = await supabase.rpc("delete_installment_payment", { p_id: op.entityId, p_edited_at: editedAt });
+    if (removed.error) return fromDbError(op, removed.error as NonNullable<DbError>, INSTALLMENT_MIGRATION_MESSAGES);
+    return done(op, { conflict: lww.conflict, serverUpdatedAt: null });
+  }
+
+  // CREATE retried after a lost response: the atomic save already wrote both rows.
+  if (op.op === "CREATE" && row) return already(op, (row.updated_at as string) ?? null);
+  if (op.op === "UPDATE" && !row) return rejected(op, "This installment payment no longer exists.");
+
+  const picked = pick(op.payload, INSTALLMENT_PAYMENT_FIELDS);
+  const next = paymentColumns(row ? { ...row, ...picked, installment_plan_id: row.installment_plan_id } : picked);
+  if (row && samePayment(paymentColumns(row), next)) return already(op, (row.updated_at as string) ?? null);
+  if (!UUID.test(next.installment_plan_id)) return rejected(op, "This installment payment is invalid.");
+  for (const id of [next.account_id, next.transaction_id]) if (id !== null && !UUID.test(id)) return rejected(op, "This installment payment is invalid.");
+
+  let conflict: SyncConflict | undefined;
+  if (row) {
+    const lww = lastWriteWins(row.updated_at, op.baseUpdatedAt, editedAt);
+    if (!lww.apply) return done(op, { conflict: lww.conflict, serverUpdatedAt: (row.updated_at as string) ?? null });
+    conflict = lww.conflict;
+  }
+
+  const planResult = await loadOwnRow(supabase, "installment_plans", INSTALLMENT_PLAN_SELECT, userId, next.installment_plan_id);
+  if (planResult.error) return fromDbError(op, planResult.error, INSTALLMENT_MIGRATION_MESSAGES);
+  const plan = planResult.row;
+  if (!plan) return rejected(op, "This installment plan no longer exists.");
+  if (!row && plan.lifecycle === "cancelled") return rejected(op, "Reactivate this plan before recording a payment.");
+  if (!isInstallmentCycle(plan.billing_cycle)) return rejected(op, "This plan has an invalid schedule.");
+  const count = Number(plan.installment_count);
+
+  const invalid = validatePaymentFields(
+    {
+      installmentNumber: next.installment_number,
+      kind: next.kind,
+      coversThrough: next.covers_through,
+      actualAmount: next.actual_amount,
+      paymentDate: next.payment_date,
+      paymentMethod: next.payment_method,
+      accountId: next.account_id,
+      transactionOrigin: next.transaction_origin,
+      transactionId: next.transaction_id,
+      notes: next.notes ?? "",
+    },
+    count
+  );
+  if (invalid) return rejected(op, invalid);
+
+  const siblingsResult = await loadPlanPayments(supabase, userId, next.installment_plan_id);
+  if (siblingsResult.error) return fromDbError(op, siblingsResult.error, INSTALLMENT_MIGRATION_MESSAGES);
+  // Early, friendly rejections. save_installment_payment() enforces all of this again (and computes
+  // the due date, expected amount, category and description itself).
+  const siblings = siblingsResult.payments.filter((payment) => payment.id !== op.entityId);
+  const coverage = coverageError(
+    { installmentNumber: next.installment_number, kind: next.kind, coversThrough: next.covers_through },
+    count,
+    siblings
+  );
+  if (coverage) return rejected(op, coverage);
+  if (next.kind === "closure" && closureExpectedCents({ total_repayment_amount: plan.total_repayment_amount as string | number }, siblings) <= 0) {
+    return rejected(op, "Nothing remains to be paid on this plan.");
+  }
+
+  let categoryId: string | null = null;
+  let description: string | null = null;
+  if (next.payment_method === "account") {
+    if (next.transaction_origin === "created") {
+      const category = await installmentCategoryIdOnServer(supabase);
+      if (category.error) return fromDbError(op, category.error, INSTALLMENT_MIGRATION_MESSAGES);
+      if (!category.id) return rejected(op, "The Installment Payment category is missing. Run the Installments migration.");
+      categoryId = category.id;
+      description = installmentTransactionDescription(String(plan.name), next.installment_number, count, next.kind, next.covers_through);
+      // The same account/category/field rules as every other expense transaction.
+      const transactionInvalid = await validateTransactionInput(
+        {
+          type: "expense",
+          amount: next.actual_amount,
+          accountId: next.account_id!,
+          categoryId,
+          transactionDate: next.payment_date,
+          transactionTime: next.transaction_time,
+          remark: description,
+        },
+        userId,
+        supabase
+      );
+      if (transactionInvalid) return rejected(op, transactionInvalid);
+    } else {
+      const linked = await loadOwnRow(supabase, "transactions", "id, account_id, type, amount", userId, next.transaction_id!);
+      if (linked.error) return fromDbError(op, linked.error);
+      if (!linked.row) return rejected(op, "The linked transaction no longer exists.");
+      if (linked.row.type !== "expense") return rejected(op, "Only an expense transaction can be linked.");
+      // While a link is unchanged, the transaction is the source of truth: save_installment_payment
+      // copies its current amount, date and account, so a payment edit queued before the
+      // transaction was edited in Transactions must not be rejected for carrying the old values.
+      const sameLink = row?.transaction_origin === "linked" && row.transaction_id === next.transaction_id;
+      if (!sameLink) {
+        if (linked.row.account_id !== next.account_id) return rejected(op, "The linked transaction is from a different account.");
+        if (toCents(linked.row.amount as number) !== toCents(next.actual_amount)) {
+          return rejected(op, "The linked transaction amount must match the amount paid.");
+        }
+      }
+      if (row?.transaction_origin === "created" && row.transaction_id === next.transaction_id) {
+        return rejected(op, "This expense was recorded by this payment; keep it as a new expense instead of linking it.");
+      }
+    }
+  }
+
+  const paidAt = row ? null : resolveEditedAt(String(op.payload.paid_at ?? editedAt), new Date(editedAt));
+  const saved = await supabase.rpc("save_installment_payment", {
+    p_id: op.entityId,
+    p_plan_id: next.installment_plan_id,
+    p_installment_number: next.installment_number,
+    p_kind: next.kind,
+    p_actual_amount: next.actual_amount,
+    p_payment_date: next.payment_date,
+    p_payment_method: next.payment_method,
+    p_account_id: next.payment_method === "account" ? next.account_id : null,
+    p_transaction_id: next.payment_method === "account" ? next.transaction_id : null,
+    p_transaction_origin: next.payment_method === "account" ? next.transaction_origin : null,
+    p_transaction_time: next.transaction_time ? `${next.transaction_time}:00` : null,
+    p_notes: next.notes,
+    p_paid_at: paidAt,
+    p_edited_at: editedAt,
+  });
+  if (saved.error) return fromDbError(op, saved.error as NonNullable<DbError>, PAYMENT_UNIQUE_MESSAGES(next.installment_number));
+  return done(op, { conflict, serverUpdatedAt: editedAt });
 }

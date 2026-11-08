@@ -12,7 +12,7 @@ import { requestSync, startSyncEngine } from "@/lib/offline/sync";
 
 // Keep this in sync with public/sw.js. A new worker version gets one fresh route-warm
 // signature without permanently disabling future warming.
-const ROUTE_WARM_VERSION = "finance-tracker-shell-v5";
+const ROUTE_WARM_VERSION = "finance-tracker-shell-v6";
 const FIXED_OFFLINE_ROUTES = [
   "/home",
   "/transactions",
@@ -23,6 +23,7 @@ const FIXED_OFFLINE_ROUTES = [
   "/daily-budget",
   "/subscriptions",
   "/bills",
+  "/installments",
 ] as const;
 
 export function OfflineDataProvider({ children }: { children: React.ReactNode }) {

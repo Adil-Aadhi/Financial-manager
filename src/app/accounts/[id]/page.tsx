@@ -4,6 +4,7 @@ import { AccountFABRegistrar } from "@/components/accounts/AccountFABRegistrar";
 import { OfflineAccountDetails } from "@/components/accounts/OfflineAccountDetails";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
 import { Alert } from "@/components/ui/Alert";
+import { getManagedTransactionsForAccount } from "@/lib/supabase/installments";
 import { getAuthenticatedUserProfile } from "@/lib/supabase/profile";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -141,6 +142,9 @@ export default async function AccountDetailsPage({ params }: AccountPageProps) {
     ];
   });
 
+  // Read only: which of these expenses are managed by Installments (shown read-only).
+  const managedTransactions = serverMissing ? [] : await getManagedTransactionsForAccount(supabase, user.id, id);
+
   const userName = profile.full_name || user.email?.split("@")[0] || "User";
 
   return (
@@ -169,6 +173,7 @@ export default async function AccountDetailsPage({ params }: AccountPageProps) {
           account={accountData}
           transactions={transactions}
           categories={categories}
+          managedTransactions={managedTransactions}
           fallbackCurrency={profile.default_currency}
           serverMissing={serverMissing}
         />

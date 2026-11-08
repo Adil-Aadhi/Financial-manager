@@ -2,19 +2,21 @@
 
 import React, { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarDays, Pencil, Search, SlidersHorizontal, Trash2, X } from "lucide-react";
+import Link from "next/link";
+import { CalendarDays, Lock, Pencil, Search, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { deleteTransactionAction } from "@/app/actions/transactions";
 import { markOfflineDataStale } from "@/lib/offline/bootstrap";
 import { deleteTransactionLocally, runMutation } from "@/lib/offline/mutations";
 import { CategoryTile } from "@/components/categories/CategoryIcon";
 import { QuickTransactionModal } from "@/components/transactions/QuickTransactionModal";
 import { Alert } from "@/components/ui/Alert";
-import { Button } from "@/components/ui/Button";
+import { Button, buttonBase, buttonSizes, buttonVariants } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { cn } from "@/lib/cn";
 import { formatMoney } from "@/lib/format";
+import { managedTransactionHref, type ManagedTransactionInfo } from "@/lib/installments";
 import type { SupportedCurrency } from "@/lib/supabase/profile";
 import {
   normalizeTransactionDate,
@@ -72,10 +74,13 @@ export function TransactionHistory({
   transactions,
   currency,
   categories,
+  managed,
 }: {
   transactions: TransactionRecord[];
   currency: SupportedCurrency;
   categories: TransactionCategoryOption[];
+  /** Installment-generated expenses: view only here, changed from the Installments page. */
+  managed?: Map<string, ManagedTransactionInfo>;
 }) {
   const [filter, setFilter] = useState<TransactionFilter>("all");
   const [search, setSearch] = useState("");
@@ -88,6 +93,7 @@ export function TransactionHistory({
   const [draftCategoryId, setDraftCategoryId] = useState("");
   const [editingTransaction, setEditingTransaction] = useState<TransactionRecord | null>(null);
   const [deletingTransaction, setDeletingTransaction] = useState<TransactionRecord | null>(null);
+  const [viewingManaged, setViewingManaged] = useState<{ transaction: TransactionRecord; info: ManagedTransactionInfo } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   const visibleTransactions = useMemo(() => {
@@ -251,7 +257,12 @@ export function TransactionHistory({
                       key={transaction.id}
                       transaction={transaction}
                       currency={currency}
-                      onEdit={() => setEditingTransaction(transaction)}
+                      managed={managed?.get(transaction.id)}
+                      onEdit={() => {
+                        const info = managed?.get(transaction.id);
+                        if (info) setViewingManaged({ transaction, info });
+                        else setEditingTransaction(transaction);
+                      }}
                       onDelete={() => setDeletingTransaction(transaction)}
                     />
                   ))}
@@ -383,6 +394,15 @@ export function TransactionHistory({
         />
       )}
 
+      {viewingManaged && (
+        <ManagedTransactionModal
+          transaction={viewingManaged.transaction}
+          info={viewingManaged.info}
+          currency={currency}
+          onClose={() => setViewingManaged(null)}
+        />
+      )}
+
       {deletingTransaction && (
         <DeleteTransactionModal
           key={deletingTransaction.id}
@@ -402,11 +422,13 @@ export function TransactionHistory({
 function TransactionRow({
   transaction,
   currency,
+  managed,
   onEdit,
   onDelete,
 }: {
   transaction: TransactionRecord;
   currency: SupportedCurrency;
+  managed?: ManagedTransactionInfo;
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -422,13 +444,19 @@ function TransactionRow({
       <button
         type="button"
         onClick={onEdit}
-        aria-label={`Edit ${title}`}
+        aria-label={managed ? `View ${title} (managed by Installments)` : `Edit ${title}`}
         className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-glass-hover active:bg-glass-hover sm:px-4 sm:py-3"
       >
         <CategoryTile icon={transaction.category?.icon} size="md" />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold text-fg">{title}</p>
           {meta && <p className="mt-0.5 truncate text-[11px] text-fg-subtle">{meta}</p>}
+          {managed && (
+            <p className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-accent">
+              <Lock className="h-3 w-3" aria-hidden="true" />
+              Managed by Installments
+            </p>
+          )}
         </div>
         <p
           className={cn(
@@ -439,7 +467,7 @@ function TransactionRow({
           {signedAmount(transaction, currency)}
         </p>
       </button>
-      <div className="hidden shrink-0 gap-1 pr-3 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 lg:flex">
+      {!managed && <div className="hidden shrink-0 gap-1 pr-3 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 lg:flex">
         <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onEdit} aria-label={`Edit ${title}`}>
           <Pencil className="h-3.5 w-3.5" />
         </Button>
@@ -452,7 +480,7 @@ function TransactionRow({
         >
           <Trash2 className="h-3.5 w-3.5" />
         </Button>
-      </div>
+      </div>}
     </li>
   );
 }
@@ -519,6 +547,54 @@ function DeleteTransactionModal({
             {isPending ? "Deleting…" : "Delete"}
           </Button>
         </div>
+      </div>
+    </Modal>
+  );
+}
+
+/** Read-only view of an installment-generated expense, with a way to its installment payment. */
+function ManagedTransactionModal({
+  transaction,
+  info,
+  currency,
+  onClose,
+}: {
+  transaction: TransactionRecord;
+  info: ManagedTransactionInfo;
+  currency: SupportedCurrency;
+  onClose: () => void;
+}) {
+  const date = normalizeTransactionDate(transaction.transaction_date);
+  const time = formatTransactionTime(transaction.transaction_time);
+  const installment =
+    info.kind === "closure"
+      ? `Early closure ${info.coversThrough > info.installmentNumber ? `${info.installmentNumber}–${info.coversThrough}` : info.installmentNumber}/${info.installmentCount}`
+      : `Installment ${info.installmentNumber}/${info.installmentCount}`;
+  return (
+    <Modal isOpen onClose={onClose} title="Installment expense" description="Managed by Installments" size="sm">
+      <div className="space-y-4">
+        <div className="flex items-center gap-3 rounded-2xl border border-line bg-glass-hover p-3.5">
+          <CategoryTile icon={transaction.category?.icon} size="md" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold text-fg">{transaction.description || transaction.category?.name || "Expense"}</p>
+            <p className="truncate text-xs text-fg-subtle">
+              {[transaction.category?.name, date ? formatDayHeading(date) : null, time].filter(Boolean).join(" · ")}
+            </p>
+          </div>
+          <p className="shrink-0 font-money text-base font-semibold text-danger">{signedAmount(transaction, currency)}</p>
+        </div>
+        <p className="flex gap-2 rounded-xl border border-line bg-glass-input p-3 text-xs leading-relaxed text-fg-muted">
+          <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" aria-hidden="true" />
+          <span>
+            Recorded by {info.planName} · {installment}. To change its amount, date or account, or to remove it, edit or undo the payment in Installments so the payment and this expense stay in step.
+          </span>
+        </p>
+        <Link
+          href={managedTransactionHref(info)}
+          className={cn(buttonBase, buttonVariants.primary, buttonSizes.lg, "w-full")}
+        >
+          Open in Installments
+        </Link>
       </div>
     </Modal>
   );

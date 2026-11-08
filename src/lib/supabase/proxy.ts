@@ -15,6 +15,7 @@ export async function updateSession(request: NextRequest) {
     "/trash",
     "/subscriptions",
     "/bills",
+    "/installments",
   ];
   const isProtectedRoute = protectedRoutes.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`)

@@ -26,6 +26,26 @@ import {
 } from "@/lib/dailyBudget";
 import { isCategoryType } from "@/lib/categories";
 import {
+  INSTALLMENT_CATEGORY_NAME,
+  INSTALLMENT_MANAGED_MESSAGE,
+  closureExpectedCents,
+  computeFinancials,
+  coverageError,
+  expectedInstallmentCents,
+  installmentDueDate,
+  installmentTransactionDescription,
+  isInstallmentLifecycle,
+  settledLifecycle,
+  validatePaymentFields,
+  validatePlanAgainstPayments,
+  validatePlanInput,
+  type InstallmentLifecycle,
+  type InstallmentPaymentKind,
+  type InstallmentPaymentMethod,
+  type InstallmentPlanInput,
+  type InstallmentTransactionOrigin,
+} from "@/lib/installments";
+import {
   addBillingCycle,
   isSubscriptionLifecycle,
   validateSubscriptionInput,
@@ -51,6 +71,7 @@ import {
 } from "@/lib/offline/db";
 import {
   isTransactionDateChange,
+  normalizeTransactionDate,
   type TransactionFormOptions,
   type TransactionType,
 } from "@/lib/transactions";
@@ -278,6 +299,8 @@ const WRITE_TABLES = [
   offlineDb.subscriptionPayments,
   offlineDb.bills,
   offlineDb.billPayments,
+  offlineDb.installmentPlans,
+  offlineDb.installmentPayments,
   offlineDb.syncMeta,
   offlineDb.outbox,
 ];
@@ -326,6 +349,43 @@ function transactionColumns(input: LocalTransactionInput) {
   };
 }
 
+/**
+ * An expense created by an installment payment changes only through that payment (Installments
+ * page), on this device exactly as on the server. Linked transactions are the user's own and stay
+ * editable.
+ */
+async function refuseInstallmentManaged(ownerId: string, transactionId: string) {
+  const payment = await offlineDb.installmentPayments.where("[ownerId+transaction_id]").equals([ownerId, transactionId]).first();
+  if (payment?.transaction_origin === "created") throw new LocalMutationError(INSTALLMENT_MANAGED_MESSAGE);
+}
+
+/**
+ * A manually linked installment payment follows its transaction on this device exactly as the
+ * sync_linked_installment_payment trigger does on the server: an amount, date or account edit is
+ * copied to the payment; a delete (or a change to income) clears only the payment's transaction and
+ * account references. No extra outbox entry is written: the queued transaction change makes the
+ * server trigger do the same thing, so nothing can be applied twice.
+ */
+async function followLinkedTransaction(ownerId: string, transactionId: string, next: LocalTransaction | null) {
+  const payments = (await offlineDb.installmentPayments.where("[ownerId+transaction_id]").equals([ownerId, transactionId]).toArray())
+    .filter((payment) => payment.transaction_origin === "linked");
+  for (const payment of payments) {
+    if (!next || next.type !== "expense") {
+      await offlineDb.installmentPayments.update([ownerId, payment.id], { transaction_id: null, account_id: null });
+      continue;
+    }
+    const paymentDate = normalizeTransactionDate(next.transaction_date) ?? payment.payment_date;
+    const amount = roundAmount(Number(next.amount));
+    if (Math.round(Number(payment.actual_amount) * 100) === Math.round(amount * 100) && payment.payment_date === paymentDate && payment.account_id === next.account_id) continue;
+    await offlineDb.installmentPayments.update([ownerId, payment.id], {
+      actual_amount: amount,
+      payment_date: paymentDate,
+      account_id: next.account_id,
+      updated_at: new Date().toISOString(),
+    });
+  }
+}
+
 export function createTransactionLocally(ownerId: string, input: LocalTransactionInput) {
   return inLocalTransaction(async () => {
     await requireLocalSnapshot(ownerId);
@@ -354,6 +414,7 @@ export function updateTransactionLocally(ownerId: string, input: LocalTransactio
     if (!input.transactionId) throw new LocalMutationError("Transaction not found.");
     const existing = await offlineDb.transactions.get([ownerId, input.transactionId]);
     if (!existing) throw new LocalMutationError("Transaction not found.");
+    await refuseInstallmentManaged(ownerId, existing.id);
     const invalid = await validateTransaction(ownerId, input);
     if (invalid) throw new LocalMutationError(invalid);
 
@@ -363,6 +424,7 @@ export function updateTransactionLocally(ownerId: string, input: LocalTransactio
         : "unchanged";
     const changes = { ...transactionColumns(input), updated_at: new Date().toISOString() };
     await offlineDb.transactions.update([ownerId, existing.id], changes);
+    await followLinkedTransaction(ownerId, existing.id, { ...existing, ...changes });
     await enqueue(
       ownerId,
       "transaction",
@@ -380,7 +442,9 @@ export function deleteTransactionLocally(ownerId: string, transactionId: string)
     await requireLocalSnapshot(ownerId);
     const existing = await offlineDb.transactions.get([ownerId, transactionId]);
     if (!existing) throw new LocalMutationError("Transaction not found.");
+    await refuseInstallmentManaged(ownerId, transactionId);
     await offlineDb.transactions.delete([ownerId, transactionId]);
+    await followLinkedTransaction(ownerId, transactionId, null);
     await enqueue(
       ownerId,
       "transaction",
@@ -1097,5 +1161,363 @@ export function deleteBillPaymentLocally(ownerId: string, paymentId: string) {
     await offlineDb.billPayments.delete([ownerId, paymentId]);
     if (bill && rollbackDueDate) await offlineDb.bills.update([ownerId, bill.id], { next_due_date: rollbackDueDate, updated_at: now });
     await enqueue(ownerId, "bill_payment", paymentId, "DELETE", { bill_id: payment.bill_id, due_date: payment.due_date, rollback_due_date: rollbackDueDate }, payment.updated_at ?? null);
+  });
+}
+
+/* ---------------------------------------------------------------- installments tracker */
+
+async function requireInstallments(ownerId: string) {
+  await requireLocalSnapshot(ownerId);
+  const meta = await offlineDb.syncMeta.get(ownerId);
+  if (meta?.installmentsAvailable !== true) {
+    throw new LocalMutationError("Installments aren't ready on this device yet. Connect to the internet once, then try again.");
+  }
+}
+
+export interface LocalInstallmentPlanInput extends InstallmentPlanInput {
+  id: string;
+  lifecycle?: InstallmentLifecycle;
+}
+
+/** Server columns for a plan; financed and total amounts are always derived, never typed in. */
+export function installmentPlanColumns(input: InstallmentPlanInput) {
+  const financials = computeFinancials(input);
+  return {
+    name: input.name.trim(),
+    description: input.description.trim() || null,
+    plan_type: input.planType,
+    provider: input.provider.trim(),
+    product_category: input.productCategory,
+    icon: input.icon,
+    original_amount: roundAmount(input.originalAmount),
+    down_payment: roundAmount(input.downPayment),
+    financed_amount: financials.financedCents / 100,
+    interest_amount: roundAmount(input.interestAmount),
+    additional_fees: roundAmount(input.additionalFees),
+    total_repayment_amount: financials.totalCents / 100,
+    currency: input.currency,
+    installment_count: input.installmentCount,
+    default_installment_amount: roundAmount(input.defaultInstallmentAmount),
+    billing_cycle: input.billingCycle,
+    billing_interval: input.billingCycle.startsWith("custom_") ? input.billingInterval : 1,
+    start_date: input.startDate,
+    first_due_date: input.firstDueDate,
+    reminder_days: input.reminderDays,
+    notes: input.notes.trim() || null,
+  };
+}
+
+export function createInstallmentPlanLocally(ownerId: string, input: LocalInstallmentPlanInput) {
+  return inLocalTransaction(async () => {
+    await requireInstallments(ownerId);
+    const invalid = validatePlanInput(input);
+    if (invalid) throw new LocalMutationError(invalid);
+    if (await offlineDb.installmentPlans.get([ownerId, input.id])) return;
+    const now = new Date().toISOString();
+    const row = {
+      ownerId,
+      id: input.id,
+      user_id: ownerId,
+      ...installmentPlanColumns(input),
+      lifecycle: "active" as const,
+      created_at: now,
+      updated_at: now,
+    };
+    await offlineDb.installmentPlans.add(row);
+    const { ownerId: _owner, ...payload } = row;
+    void _owner;
+    await enqueue(ownerId, "installment_plan", input.id, "CREATE", payload, null);
+  });
+}
+
+export function updateInstallmentPlanLocally(ownerId: string, input: LocalInstallmentPlanInput) {
+  return inLocalTransaction(async () => {
+    await requireInstallments(ownerId);
+    const existing = await offlineDb.installmentPlans.get([ownerId, input.id]);
+    if (!existing) throw new LocalMutationError("This installment plan no longer exists.");
+    const invalid = validatePlanInput(input);
+    if (invalid) throw new LocalMutationError(invalid);
+    const payments = await offlineDb.installmentPayments.where("[ownerId+installment_plan_id]").equals([ownerId, input.id]).toArray();
+    const conflict = validatePlanAgainstPayments(input.installmentCount, payments);
+    if (conflict) throw new LocalMutationError(conflict);
+    const changes = {
+      ...installmentPlanColumns(input),
+      lifecycle: settledLifecycle(existing.lifecycle, input.installmentCount, payments),
+      updated_at: new Date().toISOString(),
+    };
+    await offlineDb.installmentPlans.update([ownerId, input.id], changes);
+    await enqueue(ownerId, "installment_plan", input.id, "UPDATE", changes, existing.updated_at ?? null);
+  });
+}
+
+/** Pause, resume or cancel. Resuming a fully settled plan lands on "completed". */
+export function setInstallmentPlanLifecycleLocally(ownerId: string, planId: string, lifecycle: InstallmentLifecycle) {
+  return inLocalTransaction(async () => {
+    await requireInstallments(ownerId);
+    if (!isInstallmentLifecycle(lifecycle) || lifecycle === "completed") throw new LocalMutationError("Choose a valid plan state.");
+    const existing = await offlineDb.installmentPlans.get([ownerId, planId]);
+    if (!existing) throw new LocalMutationError("This installment plan no longer exists.");
+    const payments = await offlineDb.installmentPayments.where("[ownerId+installment_plan_id]").equals([ownerId, planId]).toArray();
+    const next = lifecycle === "active" ? settledLifecycle("active", existing.installment_count, payments) : lifecycle;
+    const changes = { lifecycle: next, updated_at: new Date().toISOString() };
+    await offlineDb.installmentPlans.update([ownerId, planId], changes);
+    await enqueue(ownerId, "installment_plan", planId, "UPDATE", changes, existing.updated_at ?? null);
+  });
+}
+
+/** Deletes the plan and its payment history. Expense transactions already recorded are kept. */
+export function deleteInstallmentPlanLocally(ownerId: string, planId: string) {
+  return inLocalTransaction(async () => {
+    await requireInstallments(ownerId);
+    const existing = await offlineDb.installmentPlans.get([ownerId, planId]);
+    if (!existing) throw new LocalMutationError("This installment plan no longer exists.");
+    await offlineDb.installmentPlans.delete([ownerId, planId]);
+    const payments = await offlineDb.installmentPayments.where("[ownerId+installment_plan_id]").equals([ownerId, planId]).toArray();
+    await offlineDb.installmentPayments.bulkDelete(payments.map((payment) => [ownerId, payment.id] as [string, string]));
+    await enqueue(ownerId, "installment_plan", planId, "DELETE", { id: planId }, existing.updated_at ?? null);
+  });
+}
+
+export interface LocalInstallmentPaymentInput {
+  paymentId: string;
+  planId: string;
+  installmentNumber: number;
+  kind: InstallmentPaymentKind;
+  coversThrough: number;
+  actualAmount: number;
+  paymentDate: string;
+  paymentMethod: InstallmentPaymentMethod;
+  accountId: string | null;
+  /** 'created': a new expense is recorded with transactionId; 'linked': an existing one is used. */
+  transactionOrigin: InstallmentTransactionOrigin | null;
+  transactionId: string | null;
+  notes: string;
+  /** "HH:MM" for the created expense, or "" for no time. */
+  transactionTime: string;
+  paidAt?: string;
+}
+
+async function installmentCategoryId(ownerId: string) {
+  const categories = await offlineDb.categories.where("ownerId").equals(ownerId).toArray();
+  const category = categories.find(
+    (item) => item.is_default && item.type === "expense" && item.name.trim().toLowerCase() === INSTALLMENT_CATEGORY_NAME.toLowerCase()
+  );
+  if (!category) {
+    throw new LocalMutationError("The Installment Payment category isn't available yet. Apply the Installments migration, then reconnect once.");
+  }
+  return category.id;
+}
+
+/**
+ * Records or corrects an installment payment. For a Linked Account payment the expense
+ * transaction is written in the same local transaction (so balances update at once) and travels
+ * inside the same queued operation, which the server applies atomically. Cash and Other / Manual
+ * payments never touch the transactions table, except to remove an expense this payment created
+ * earlier when its method is changed away from an account.
+ */
+export function saveInstallmentPaymentLocally(ownerId: string, input: LocalInstallmentPaymentInput) {
+  return inLocalTransaction(async () => {
+    await requireInstallments(ownerId);
+    const plan = await offlineDb.installmentPlans.get([ownerId, input.planId]);
+    if (!plan) throw new LocalMutationError("This installment plan no longer exists.");
+    const existing = (await offlineDb.installmentPayments.get([ownerId, input.paymentId])) ?? null;
+    if (existing && existing.installment_plan_id !== input.planId) throw new LocalMutationError("This payment belongs to a different plan.");
+    if (!existing && plan.lifecycle === "cancelled") throw new LocalMutationError("Reactivate this plan before recording a payment.");
+
+    const invalid = validatePaymentFields(
+      {
+        installmentNumber: input.installmentNumber,
+        kind: input.kind,
+        coversThrough: input.coversThrough,
+        actualAmount: input.actualAmount,
+        paymentDate: input.paymentDate,
+        paymentMethod: input.paymentMethod,
+        accountId: input.accountId,
+        transactionOrigin: input.transactionOrigin,
+        transactionId: input.transactionId,
+        notes: input.notes,
+      },
+      plan.installment_count
+    );
+    if (invalid) throw new LocalMutationError(invalid);
+
+    const siblings = (await offlineDb.installmentPayments.where("[ownerId+installment_plan_id]").equals([ownerId, input.planId]).toArray())
+      .filter((payment) => payment.id !== input.paymentId);
+    const coverage = coverageError(input, plan.installment_count, siblings);
+    if (coverage) throw new LocalMutationError(coverage);
+    // Same rules as save_installment_payment(): the schedule amount for one installment; for an
+    // early closure, the total repayment minus everything actually paid.
+    const expectedCents =
+      input.kind === "closure" ? closureExpectedCents(plan, siblings) : expectedInstallmentCents(plan, input.installmentNumber);
+    if (expectedCents <= 0) throw new LocalMutationError("Nothing remains to be paid on this plan.");
+
+    const now = new Date().toISOString();
+    let actual = roundAmount(input.actualAmount);
+    let paymentDate = input.paymentDate;
+    let accountId = input.accountId;
+    let transactionRow: Record<string, unknown> | null = null;
+
+    // A manually linked transaction is the source of truth for its payment (same rule as
+    // save_installment_payment): while the link is unchanged, amount, date and account come from it.
+    const sameLink =
+      input.paymentMethod === "account" &&
+      input.transactionOrigin === "linked" &&
+      existing?.transaction_origin === "linked" &&
+      existing.transaction_id === input.transactionId;
+    if (sameLink) {
+      const linked = await offlineDb.transactions.get([ownerId, input.transactionId!]);
+      if (linked && linked.type === "expense") {
+        actual = roundAmount(Number(linked.amount));
+        accountId = linked.account_id;
+        paymentDate = normalizeTransactionDate(linked.transaction_date) ?? paymentDate;
+      }
+    }
+
+    if (input.paymentMethod === "account") {
+      const account = await offlineDb.accounts.get([ownerId, accountId!]);
+      if (!account) throw new LocalMutationError("Choose one of your active accounts.");
+      // New money movement needs an active account (the database applies the same rule).
+      if (account.deleted_at && (input.transactionOrigin === "created" || existing?.account_id !== account.id)) {
+        throw new LocalMutationError("Choose one of your active accounts.");
+      }
+      const txId = input.transactionId!;
+      const otherUse = await offlineDb.installmentPayments.where("[ownerId+transaction_id]").equals([ownerId, txId]).first();
+      if (otherUse && otherUse.id !== input.paymentId) throw new LocalMutationError("That transaction already records another installment payment.");
+
+      if (input.transactionOrigin === "linked" && existing?.transaction_origin === "created" && existing.transaction_id === txId) {
+        throw new LocalMutationError("This expense was recorded by this payment; keep it as a new expense instead of linking it.");
+      }
+      if (input.transactionOrigin === "created") {
+        const ownsTransaction = existing?.transaction_origin === "created" && existing.transaction_id === txId;
+        const current = await offlineDb.transactions.get([ownerId, txId]);
+        if (current && !ownsTransaction) throw new LocalMutationError("That transaction already belongs to another record.");
+        const categoryId = await installmentCategoryId(ownerId);
+        const description = installmentTransactionDescription(plan.name, input.installmentNumber, plan.installment_count, input.kind, input.coversThrough);
+        const fieldError = transactionFieldsError({
+          type: "expense",
+          amount: actual,
+          accountId: account.id,
+          categoryId,
+          transactionDate: input.paymentDate,
+          transactionTime: input.transactionTime,
+          remark: description,
+        });
+        if (fieldError) throw new LocalMutationError(fieldError);
+        const txColumns = {
+          account_id: account.id,
+          category_id: categoryId,
+          type: "expense",
+          amount: actual,
+          description,
+          transaction_date: input.paymentDate,
+          transaction_time: input.transactionTime ? `${input.transactionTime}:00` : null,
+          created_at: current?.created_at ?? now,
+          updated_at: now,
+        };
+        transactionRow = txColumns;
+        await offlineDb.transactions.put({ ownerId, id: txId, user_id: ownerId, ...txColumns });
+      } else {
+        const linked = await offlineDb.transactions.get([ownerId, txId]);
+        if (!linked) throw new LocalMutationError("The selected transaction no longer exists.");
+        if (linked.type !== "expense") throw new LocalMutationError("Only an expense transaction can be linked.");
+        if (!sameLink) {
+          if (linked.account_id !== account.id) throw new LocalMutationError("The selected transaction is from a different account.");
+          if (Math.round(Number(linked.amount) * 100) !== Math.round(actual * 100)) {
+            throw new LocalMutationError("The linked transaction amount must match the amount paid.");
+          }
+          const queued = await offlineDb.outbox.where("[ownerId+entity+entityId]").equals([ownerId, "transaction", txId]).count();
+          if (queued > 0) throw new LocalMutationError("That transaction hasn't synced yet. Link it once it has synced.");
+          // A linked payment is dated by its transaction (India calendar).
+          paymentDate = normalizeTransactionDate(linked.transaction_date) ?? paymentDate;
+        }
+      }
+    }
+
+    const previousTransactionId =
+      existing?.transaction_origin === "created" &&
+      existing.transaction_id &&
+      (input.transactionOrigin !== "created" || input.transactionId !== existing.transaction_id)
+        ? existing.transaction_id
+        : null;
+    if (previousTransactionId) await offlineDb.transactions.delete([ownerId, previousTransactionId]);
+
+    const row = {
+      ownerId,
+      id: input.paymentId,
+      user_id: ownerId,
+      installment_plan_id: input.planId,
+      installment_number: input.installmentNumber,
+      kind: input.kind,
+      covers_through: input.kind === "closure" ? plan.installment_count : input.installmentNumber,
+      due_date: installmentDueDate(plan, input.installmentNumber),
+      expected_amount: expectedCents / 100,
+      actual_amount: actual,
+      payment_date: paymentDate,
+      payment_method: input.paymentMethod,
+      account_id: input.paymentMethod === "account" ? accountId : null,
+      transaction_id: input.paymentMethod === "account" ? input.transactionId : null,
+      transaction_origin: input.paymentMethod === "account" ? input.transactionOrigin : null,
+      notes: input.notes.trim() || null,
+      paid_at: existing?.paid_at ?? input.paidAt ?? now,
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    await offlineDb.installmentPayments.put(row);
+
+    const planLifecycle = settledLifecycle(plan.lifecycle, plan.installment_count, [...siblings, row]);
+    if (planLifecycle !== plan.lifecycle) await offlineDb.installmentPlans.update([ownerId, plan.id], { lifecycle: planLifecycle, updated_at: now });
+
+    const { ownerId: _owner, ...payload } = row;
+    void _owner;
+    await enqueue(
+      ownerId,
+      "installment_payment",
+      input.paymentId,
+      existing ? "UPDATE" : "CREATE",
+      {
+        ...payload,
+        transaction_time: input.transactionTime || null,
+        transaction_row: transactionRow,
+        previous_transaction_id: previousTransactionId,
+        plan_lifecycle: planLifecycle,
+      },
+      existing?.updated_at ?? null
+    );
+  });
+}
+
+/** Undo: removes the payment and the expense it created (a linked transaction is kept). */
+export function deleteInstallmentPaymentLocally(ownerId: string, paymentId: string) {
+  return inLocalTransaction(async () => {
+    await requireInstallments(ownerId);
+    const payment = await offlineDb.installmentPayments.get([ownerId, paymentId]);
+    if (!payment) throw new LocalMutationError("This installment payment no longer exists.");
+    await offlineDb.installmentPayments.delete([ownerId, paymentId]);
+    if (payment.transaction_origin === "created" && payment.transaction_id) {
+      await offlineDb.transactions.delete([ownerId, payment.transaction_id]);
+    }
+    const plan = await offlineDb.installmentPlans.get([ownerId, payment.installment_plan_id]);
+    let planLifecycle: InstallmentLifecycle | null = null;
+    if (plan) {
+      const remaining = await offlineDb.installmentPayments.where("[ownerId+installment_plan_id]").equals([ownerId, plan.id]).toArray();
+      planLifecycle = settledLifecycle(plan.lifecycle, plan.installment_count, remaining);
+      if (planLifecycle !== plan.lifecycle) {
+        await offlineDb.installmentPlans.update([ownerId, plan.id], { lifecycle: planLifecycle, updated_at: new Date().toISOString() });
+      }
+    }
+    await enqueue(
+      ownerId,
+      "installment_payment",
+      paymentId,
+      "DELETE",
+      {
+        installment_plan_id: payment.installment_plan_id,
+        installment_number: payment.installment_number,
+        transaction_id: payment.transaction_id,
+        transaction_origin: payment.transaction_origin,
+        plan_lifecycle: planLifecycle,
+      },
+      payment.updated_at ?? null
+    );
   });
 }

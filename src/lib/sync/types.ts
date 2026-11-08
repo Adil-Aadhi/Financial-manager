@@ -10,7 +10,9 @@ export type SyncEntity =
   | "subscription"
   | "subscription_payment"
   | "bill"
-  | "bill_payment";
+  | "bill_payment"
+  | "installment_plan"
+  | "installment_payment";
 export type SyncOp = "CREATE" | "UPDATE" | "DELETE";
 export type TransactionDateIntent = "unchanged" | "changed";
 export type SyncReviewReason = "legacy-transaction-date";

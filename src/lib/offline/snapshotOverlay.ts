@@ -9,9 +9,11 @@ import type {
   LocalSubscriptionPayment,
   LocalBill,
   LocalBillPayment,
+  LocalInstallmentPayment,
+  LocalInstallmentPlan,
   OutboxEntry,
 } from "./db";
-import { isAmbiguousLegacyTransactionDateUpdate } from "@/lib/transactions";
+import { isAmbiguousLegacyTransactionDateUpdate, normalizeTransactionDate } from "@/lib/transactions";
 
 export interface LocalSnapshotRows {
   accounts: LocalAccount[];
@@ -25,6 +27,20 @@ export interface LocalSnapshotRows {
   subscriptionPayments?: LocalSubscriptionPayment[];
   bills?: LocalBill[];
   billPayments?: LocalBillPayment[];
+  installmentPlans?: LocalInstallmentPlan[];
+  installmentPayments?: LocalInstallmentPayment[];
+}
+
+/**
+ * Keys an installment_payment operation carries for the device only (never stored on the payment
+ * row): the expense transaction it writes, the one it stops using, and the plan's new lifecycle.
+ */
+export const INSTALLMENT_PAYMENT_LOCAL_KEYS = ["transaction_row", "previous_transaction_id", "plan_lifecycle", "transaction_time"] as const;
+
+export function installmentPaymentRow(payload: Record<string, unknown>) {
+  const row: Record<string, unknown> = { ...payload };
+  for (const key of INSTALLMENT_PAYMENT_LOCAL_KEYS) delete row[key];
+  return row;
 }
 
 function byId<T extends { id: string }>(rows: T[]) {
@@ -59,6 +75,28 @@ export function overlayOutbox(
   const previousBills = byId(previous.bills ?? []);
   const billPayments = byId(server.billPayments ?? []);
   const previousBillPayments = byId(previous.billPayments ?? []);
+  const installmentPlans = byId(server.installmentPlans ?? []);
+  const previousInstallmentPlans = byId(previous.installmentPlans ?? []);
+  const installmentPayments = byId(server.installmentPayments ?? []);
+  const previousInstallmentPayments = byId(previous.installmentPayments ?? []);
+
+  // Pending Transactions edits of a manually linked transaction carry over to its payment, exactly
+  // like the server's sync_linked_installment_payment trigger will once they sync.
+  const followLinkedTransaction = (transactionId: string, next: LocalTransaction | null) => {
+    for (const [id, payment] of installmentPayments) {
+      if (payment.transaction_id !== transactionId || payment.transaction_origin !== "linked") continue;
+      if (!next || next.type !== "expense") {
+        installmentPayments.set(id, { ...payment, transaction_id: null, account_id: null });
+      } else {
+        installmentPayments.set(id, {
+          ...payment,
+          actual_amount: Number(next.amount),
+          payment_date: normalizeTransactionDate(next.transaction_date) ?? payment.payment_date,
+          account_id: next.account_id,
+        });
+      }
+    }
+  };
 
   for (const entry of [...entries].sort((left, right) => (left.seq ?? 0) - (right.seq ?? 0))) {
     if (entry.ownerId !== ownerId) continue;
@@ -102,6 +140,7 @@ export function overlayOutbox(
     if (entry.entity === "transaction") {
       if (entry.op === "DELETE") {
         transactions.delete(entry.entityId);
+        followLinkedTransaction(entry.entityId, null);
         continue;
       }
       const base =
@@ -119,13 +158,15 @@ export function overlayOutbox(
         ) {
           delete payload.transaction_date;
         }
-        transactions.set(entry.entityId, {
+        const next = {
           ...(base ?? ({} as LocalTransaction)),
           ...payload,
           ownerId,
           id: entry.entityId,
           user_id: ownerId,
-        } as LocalTransaction);
+        } as LocalTransaction;
+        transactions.set(entry.entityId, next);
+        followLinkedTransaction(entry.entityId, next);
       }
       continue;
     }
@@ -241,6 +282,48 @@ export function overlayOutbox(
       continue;
     }
 
+    if (entry.entity === "installment_plan") {
+      if (entry.op === "DELETE") {
+        installmentPlans.delete(entry.entityId);
+        for (const [id, payment] of installmentPayments) if (payment.installment_plan_id === entry.entityId) installmentPayments.delete(id);
+        continue;
+      }
+      const base = installmentPlans.get(entry.entityId) ?? previousInstallmentPlans.get(entry.entityId);
+      if (base || entry.op === "CREATE") {
+        installmentPlans.set(entry.entityId, { ...(base ?? ({} as LocalInstallmentPlan)), ...entry.payload, ownerId, id: entry.entityId, user_id: ownerId } as LocalInstallmentPlan);
+      }
+      continue;
+    }
+
+    if (entry.entity === "installment_payment") {
+      const payload = entry.payload;
+      const planId = String(payload.installment_plan_id ?? "");
+      const plan = installmentPlans.get(planId) ?? previousInstallmentPlans.get(planId);
+      if (plan && typeof payload.plan_lifecycle === "string") {
+        installmentPlans.set(planId, { ...plan, lifecycle: payload.plan_lifecycle } as LocalInstallmentPlan);
+      }
+      if (typeof payload.previous_transaction_id === "string") transactions.delete(payload.previous_transaction_id);
+      if (entry.op === "DELETE") {
+        installmentPayments.delete(entry.entityId);
+        if (payload.transaction_origin === "created" && typeof payload.transaction_id === "string") transactions.delete(payload.transaction_id);
+        continue;
+      }
+      const base = installmentPayments.get(entry.entityId) ?? previousInstallmentPayments.get(entry.entityId);
+      installmentPayments.set(entry.entityId, { ...(base ?? ({} as LocalInstallmentPayment)), ...installmentPaymentRow(payload), ownerId, id: entry.entityId, user_id: ownerId } as LocalInstallmentPayment);
+      const txRow = payload.transaction_row;
+      if (payload.transaction_origin === "created" && typeof payload.transaction_id === "string" && txRow && typeof txRow === "object") {
+        const txBase = transactions.get(payload.transaction_id) ?? previousTransactions.get(payload.transaction_id);
+        transactions.set(payload.transaction_id, {
+          ...(txBase ?? ({} as LocalTransaction)),
+          ...(txRow as Record<string, unknown>),
+          ownerId,
+          id: payload.transaction_id,
+          user_id: ownerId,
+        } as LocalTransaction);
+      }
+      continue;
+    }
+
     if (entry.op === "DELETE") {
       budget = null;
     } else {
@@ -265,5 +348,7 @@ export function overlayOutbox(
     subscriptionPayments: [...subscriptionPayments.values()],
     bills: [...bills.values()],
     billPayments: [...billPayments.values()],
+    installmentPlans: [...installmentPlans.values()],
+    installmentPayments: [...installmentPayments.values()],
   };
 }
