@@ -8,7 +8,9 @@ export type SyncEntity =
   | "daily_expense"
   | "daily_limit"
   | "subscription"
-  | "subscription_payment";
+  | "subscription_payment"
+  | "bill"
+  | "bill_payment";
 export type SyncOp = "CREATE" | "UPDATE" | "DELETE";
 export type TransactionDateIntent = "unchanged" | "changed";
 export type SyncReviewReason = "legacy-transaction-date";

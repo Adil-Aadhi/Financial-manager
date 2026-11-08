@@ -2,6 +2,7 @@ import "client-only";
 
 import Dexie, { type EntityTable, type Table } from "dexie";
 import type { AccountGroup } from "@/lib/accounts";
+import type { BillAmountType, BillCategory, BillCycle, BillIconName, BillLifecycle } from "@/lib/bills";
 import type { BillingCycle, SubscriptionIconName, SubscriptionLifecycle } from "@/lib/subscriptions";
 import type { SyncReviewReason, TransactionDateIntent } from "@/lib/sync/types";
 
@@ -122,6 +123,43 @@ export interface LocalSubscriptionPayment {
   updated_at?: string | null;
 }
 
+export interface LocalBill {
+  ownerId: string;
+  id: string;
+  user_id: string;
+  name: string;
+  category: BillCategory;
+  icon: BillIconName;
+  amount_type: BillAmountType;
+  expected_amount: number | string | null;
+  currency: string;
+  billing_cycle: BillCycle;
+  billing_interval: number;
+  billing_anchor_day: number;
+  start_date: string;
+  next_due_date: string;
+  reminder_days: number;
+  lifecycle: BillLifecycle;
+  notes: string | null;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface LocalBillPayment {
+  ownerId: string;
+  id: string;
+  user_id: string;
+  bill_id: string;
+  due_date: string;
+  expected_amount: number | string | null;
+  actual_amount: number | string;
+  payment_date: string;
+  paid_at: string;
+  status: "paid";
+  created_at: string;
+  updated_at?: string | null;
+}
+
 export interface LocalVerificationTotals {
   accounts: number;
   transactions: number;
@@ -140,6 +178,8 @@ export interface LocalSyncMeta {
   dailyBudgetAvailable?: boolean;
   /** Missing until a snapshot from a subscription-aware client has completed. */
   subscriptionsAvailable?: boolean;
+  /** Missing until a snapshot from a Bills-aware client has completed. */
+  billsAvailable?: boolean;
   server: LocalVerificationTotals;
   local: LocalVerificationTotals;
   totalsMatch: boolean;
@@ -153,7 +193,9 @@ export type OutboxEntity =
   | "daily_expense"
   | "daily_limit"
   | "subscription"
-  | "subscription_payment";
+  | "subscription_payment"
+  | "bill"
+  | "bill_payment";
 export type OutboxOperation = "CREATE" | "UPDATE" | "DELETE";
 /** Phase 1 only writes "pending". Phase 2's sync engine moves ops through the others. */
 export type OutboxStatus = "pending" | "syncing" | "failed";
@@ -217,6 +259,8 @@ class FinanceOfflineDatabase extends Dexie {
   dailyBudgetExpenses!: Table<LocalDailyBudgetExpense, [string, string]>;
   subscriptions!: Table<LocalSubscription, [string, string]>;
   subscriptionPayments!: Table<LocalSubscriptionPayment, [string, string]>;
+  bills!: Table<LocalBill, [string, string]>;
+  billPayments!: Table<LocalBillPayment, [string, string]>;
   syncMeta!: EntityTable<LocalSyncMeta, "ownerId">;
   outbox!: EntityTable<OutboxEntry, "seq">;
   syncConflicts!: EntityTable<SyncConflictRecord, "id">;
@@ -249,6 +293,11 @@ class FinanceOfflineDatabase extends Dexie {
     this.version(5).stores({
       subscriptions: "&[ownerId+id], ownerId, [ownerId+lifecycle], [ownerId+next_payment_date]",
       subscriptionPayments: "&[ownerId+id], ownerId, [ownerId+subscription_id], [ownerId+subscription_id+due_date]",
+    });
+    // v6 adds only the isolated Bills Tracker tables.
+    this.version(6).stores({
+      bills: "&[ownerId+id], ownerId, [ownerId+lifecycle], [ownerId+next_due_date], [ownerId+category]",
+      billPayments: "&[ownerId+id], ownerId, [ownerId+bill_id], [ownerId+bill_id+due_date], [ownerId+payment_date]",
     });
   }
 }

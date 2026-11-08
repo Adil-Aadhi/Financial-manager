@@ -8,6 +8,14 @@ import {
 } from "@/lib/accounts";
 import { validateBudgetAmount } from "@/lib/budget";
 import {
+  addBillCycle,
+  isBillLifecycle,
+  validateBillInput,
+  validateBillPayment,
+  type BillInput,
+  type BillLifecycle,
+} from "@/lib/bills";
+import {
   dailyBudgetToday,
   isDateKey,
   roundAmount,
@@ -80,6 +88,7 @@ const MOVABLE_ENTITIES = new Set<OutboxEntity>([
   "daily_expense",
   "daily_limit",
   "subscription_payment",
+  "bill_payment",
 ]);
 
 function newId() {
@@ -267,6 +276,8 @@ const WRITE_TABLES = [
   offlineDb.dailyBudgetExpenses,
   offlineDb.subscriptions,
   offlineDb.subscriptionPayments,
+  offlineDb.bills,
+  offlineDb.billPayments,
   offlineDb.syncMeta,
   offlineDb.outbox,
 ];
@@ -938,5 +949,153 @@ export function undoSubscriptionPaymentLocally(
       subscription_id: input.subscriptionId,
       due_date: input.dueDate,
     }, payment.updated_at ?? null);
+  });
+}
+
+/* ---------------------------------------------------------------- bills tracker */
+
+async function requireBills(ownerId: string) {
+  await requireLocalSnapshot(ownerId);
+  const meta = await offlineDb.syncMeta.get(ownerId);
+  if (meta?.billsAvailable !== true) throw new LocalMutationError("Bills aren't ready on this device yet. Connect to the internet once, then try again.");
+}
+
+export interface LocalBillInput extends BillInput {
+  id: string;
+  lifecycle?: BillLifecycle;
+}
+
+function billColumns(input: LocalBillInput) {
+  const [, , anchor] = input.nextDueDate.split("-").map(Number);
+  return {
+    name: input.name.trim(), category: input.category, icon: input.icon, amount_type: input.amountType,
+    expected_amount: input.expectedAmount === null ? null : roundAmount(input.expectedAmount),
+    currency: input.currency, billing_cycle: input.billingCycle,
+    billing_interval: input.billingCycle.startsWith("custom_") ? input.billingInterval : 1,
+    billing_anchor_day: anchor, start_date: input.startDate, next_due_date: input.nextDueDate,
+    reminder_days: input.reminderDays, lifecycle: input.lifecycle ?? ("active" as const),
+    notes: input.notes.trim() || null,
+  };
+}
+
+function validateLocalBill(input: LocalBillInput) {
+  const invalid = validateBillInput(input);
+  if (invalid) return invalid;
+  if (input.lifecycle && !isBillLifecycle(input.lifecycle)) return "Choose a valid bill state.";
+  return null;
+}
+
+export function createBillLocally(ownerId: string, input: LocalBillInput) {
+  return inLocalTransaction(async () => {
+    await requireBills(ownerId);
+    const invalid = validateLocalBill(input);
+    if (invalid) throw new LocalMutationError(invalid);
+    if (await offlineDb.bills.get([ownerId, input.id])) return;
+    const now = new Date().toISOString();
+    const row = { ownerId, id: input.id, user_id: ownerId, ...billColumns(input), created_at: now, updated_at: now };
+    await offlineDb.bills.add(row);
+    const { ownerId: _owner, ...payload } = row;
+    void _owner;
+    await enqueue(ownerId, "bill", input.id, "CREATE", payload, null);
+  });
+}
+
+export function updateBillLocally(ownerId: string, input: LocalBillInput) {
+  return inLocalTransaction(async () => {
+    await requireBills(ownerId);
+    const existing = await offlineDb.bills.get([ownerId, input.id]);
+    if (!existing) throw new LocalMutationError("This bill no longer exists.");
+    const invalid = validateLocalBill(input);
+    if (invalid) throw new LocalMutationError(invalid);
+    const changes = { ...billColumns(input), updated_at: new Date().toISOString() };
+    await offlineDb.bills.update([ownerId, input.id], changes);
+    await enqueue(ownerId, "bill", input.id, "UPDATE", changes, existing.updated_at ?? null);
+  });
+}
+
+export function setBillLifecycleLocally(ownerId: string, billId: string, lifecycle: BillLifecycle) {
+  return inLocalTransaction(async () => {
+    await requireBills(ownerId);
+    if (!isBillLifecycle(lifecycle)) throw new LocalMutationError("Choose a valid bill state.");
+    const existing = await offlineDb.bills.get([ownerId, billId]);
+    if (!existing) throw new LocalMutationError("This bill no longer exists.");
+    const changes = { lifecycle, updated_at: new Date().toISOString() };
+    await offlineDb.bills.update([ownerId, billId], changes);
+    await enqueue(ownerId, "bill", billId, "UPDATE", changes, existing.updated_at ?? null);
+  });
+}
+
+export function deleteBillLocally(ownerId: string, billId: string) {
+  return inLocalTransaction(async () => {
+    await requireBills(ownerId);
+    const existing = await offlineDb.bills.get([ownerId, billId]);
+    if (!existing) throw new LocalMutationError("This bill no longer exists.");
+    await offlineDb.bills.delete([ownerId, billId]);
+    const payments = await offlineDb.billPayments.where("[ownerId+bill_id]").equals([ownerId, billId]).toArray();
+    await offlineDb.billPayments.bulkDelete(payments.map((payment) => [ownerId, payment.id]));
+    await enqueue(ownerId, "bill", billId, "DELETE", { id: billId }, existing.updated_at ?? null);
+  });
+}
+
+export interface LocalBillPaymentInput {
+  paymentId: string;
+  billId: string;
+  dueDate: string;
+  actualAmount: number;
+  paymentDate: string;
+  paidAt?: string;
+}
+
+export function createBillPaymentLocally(ownerId: string, input: LocalBillPaymentInput) {
+  return inLocalTransaction(async () => {
+    await requireBills(ownerId);
+    const bill = await offlineDb.bills.get([ownerId, input.billId]);
+    if (!bill) throw new LocalMutationError("This bill no longer exists.");
+    if (bill.lifecycle !== "active") throw new LocalMutationError("Resume this bill before marking it paid.");
+    const invalid = validateBillPayment(input.actualAmount, input.paymentDate, input.dueDate);
+    if (invalid) throw new LocalMutationError(invalid);
+    const duplicate = await offlineDb.billPayments.where("[ownerId+bill_id+due_date]").equals([ownerId, input.billId, input.dueDate]).first();
+    if (duplicate) throw new LocalMutationError("This billing cycle is already paid.");
+    const now = input.paidAt ?? new Date().toISOString();
+    const advances = bill.next_due_date === input.dueDate;
+    const nextDueDate = advances ? addBillCycle(input.dueDate, bill.billing_cycle, bill.billing_interval, bill.billing_anchor_day) : undefined;
+    const row = {
+      ownerId, id: input.paymentId, user_id: ownerId, bill_id: input.billId, due_date: input.dueDate,
+      expected_amount: bill.expected_amount, actual_amount: roundAmount(input.actualAmount), payment_date: input.paymentDate,
+      paid_at: now, status: "paid" as const, created_at: now, updated_at: now,
+    };
+    await offlineDb.billPayments.add(row);
+    if (nextDueDate) await offlineDb.bills.update([ownerId, input.billId], { next_due_date: nextDueDate, updated_at: now });
+    const { ownerId: _owner, ...payload } = row;
+    void _owner;
+    await enqueue(ownerId, "bill_payment", input.paymentId, "CREATE", { ...payload, next_due_date: nextDueDate }, null);
+  });
+}
+
+export function updateBillPaymentLocally(ownerId: string, input: LocalBillPaymentInput) {
+  return inLocalTransaction(async () => {
+    await requireBills(ownerId);
+    const payment = await offlineDb.billPayments.get([ownerId, input.paymentId]);
+    if (!payment || payment.bill_id !== input.billId) throw new LocalMutationError("This bill payment no longer exists.");
+    const invalid = validateBillPayment(input.actualAmount, input.paymentDate, payment.due_date);
+    if (invalid) throw new LocalMutationError(invalid);
+    const changes = { actual_amount: roundAmount(input.actualAmount), payment_date: input.paymentDate, updated_at: new Date().toISOString() };
+    await offlineDb.billPayments.update([ownerId, input.paymentId], changes);
+    await enqueue(ownerId, "bill_payment", input.paymentId, "UPDATE", changes, payment.updated_at ?? null);
+  });
+}
+
+export function deleteBillPaymentLocally(ownerId: string, paymentId: string) {
+  return inLocalTransaction(async () => {
+    await requireBills(ownerId);
+    const payment = await offlineDb.billPayments.get([ownerId, paymentId]);
+    if (!payment) throw new LocalMutationError("This bill payment no longer exists.");
+    const bill = await offlineDb.bills.get([ownerId, payment.bill_id]);
+    const expectedNext = bill ? addBillCycle(payment.due_date, bill.billing_cycle, bill.billing_interval, bill.billing_anchor_day) : null;
+    const rollbackDueDate = bill && bill.next_due_date === expectedNext ? payment.due_date : undefined;
+    const now = new Date().toISOString();
+    await offlineDb.billPayments.delete([ownerId, paymentId]);
+    if (bill && rollbackDueDate) await offlineDb.bills.update([ownerId, bill.id], { next_due_date: rollbackDueDate, updated_at: now });
+    await enqueue(ownerId, "bill_payment", paymentId, "DELETE", { bill_id: payment.bill_id, due_date: payment.due_date, rollback_due_date: rollbackDueDate }, payment.updated_at ?? null);
   });
 }
