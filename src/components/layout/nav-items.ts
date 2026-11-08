@@ -21,11 +21,15 @@ export interface NavItem {
 export const DESKTOP_NAV_ITEMS: NavItem[] = [
   { label: "Home", href: "/home", icon: Home },
   { label: "Transactions", href: "/transactions", icon: ReceiptText },
-  { label: "Categories", href: "/categories", icon: Tags },
   { label: "Subscriptions", href: "/subscriptions", icon: Repeat2 },
   { label: "Bills", href: "/bills", icon: FileClock },
   { label: "Installments", href: "/installments", icon: CalendarClock },
   { label: "Reports", href: "/reports", icon: BarChart3 },
+];
+
+/** Items inside the desktop "More" menu (lg+). */
+export const DESKTOP_MORE_NAV_ITEMS: NavItem[] = [
+  { label: "Categories", href: "/categories", icon: Tags },
   { label: "Trash", href: "/trash", icon: Trash2 },
   { label: "Settings", href: "/settings", icon: Settings },
 ];
