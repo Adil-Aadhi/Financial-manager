@@ -6,7 +6,9 @@ export type SyncEntity =
   | "category"
   | "budget"
   | "daily_expense"
-  | "daily_limit";
+  | "daily_limit"
+  | "subscription"
+  | "subscription_payment";
 export type SyncOp = "CREATE" | "UPDATE" | "DELETE";
 export type TransactionDateIntent = "unchanged" | "changed";
 export type SyncReviewReason = "legacy-transaction-date";

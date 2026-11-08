@@ -2,6 +2,7 @@ import "client-only";
 
 import Dexie, { type EntityTable, type Table } from "dexie";
 import type { AccountGroup } from "@/lib/accounts";
+import type { BillingCycle, SubscriptionIconName, SubscriptionLifecycle } from "@/lib/subscriptions";
 import type { SyncReviewReason, TransactionDateIntent } from "@/lib/sync/types";
 
 export interface LocalProfile {
@@ -92,6 +93,35 @@ export interface LocalDailyBudgetExpense {
   updated_at?: string | null;
 }
 
+export interface LocalSubscription {
+  ownerId: string;
+  id: string;
+  user_id: string;
+  name: string;
+  icon: SubscriptionIconName;
+  amount: number | string;
+  currency: string;
+  billing_cycle: BillingCycle;
+  billing_anchor_day: number;
+  start_date: string;
+  next_payment_date: string;
+  lifecycle: SubscriptionLifecycle;
+  notes: string | null;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface LocalSubscriptionPayment {
+  ownerId: string;
+  id: string;
+  user_id: string;
+  subscription_id: string;
+  due_date: string;
+  paid_at: string;
+  created_at: string;
+  updated_at?: string | null;
+}
+
 export interface LocalVerificationTotals {
   accounts: number;
   transactions: number;
@@ -108,6 +138,8 @@ export interface LocalSyncMeta {
    * feature existed; read with `=== true`, and the next refresh fills it in.
    */
   dailyBudgetAvailable?: boolean;
+  /** Missing until a snapshot from a subscription-aware client has completed. */
+  subscriptionsAvailable?: boolean;
   server: LocalVerificationTotals;
   local: LocalVerificationTotals;
   totalsMatch: boolean;
@@ -119,7 +151,9 @@ export type OutboxEntity =
   | "category"
   | "budget"
   | "daily_expense"
-  | "daily_limit";
+  | "daily_limit"
+  | "subscription"
+  | "subscription_payment";
 export type OutboxOperation = "CREATE" | "UPDATE" | "DELETE";
 /** Phase 1 only writes "pending". Phase 2's sync engine moves ops through the others. */
 export type OutboxStatus = "pending" | "syncing" | "failed";
@@ -181,6 +215,8 @@ class FinanceOfflineDatabase extends Dexie {
   monthlyBudgets!: EntityTable<LocalMonthlyBudget, "ownerId">;
   dailyBudgetLimits!: Table<LocalDailyBudgetLimit, [string, string]>;
   dailyBudgetExpenses!: Table<LocalDailyBudgetExpense, [string, string]>;
+  subscriptions!: Table<LocalSubscription, [string, string]>;
+  subscriptionPayments!: Table<LocalSubscriptionPayment, [string, string]>;
   syncMeta!: EntityTable<LocalSyncMeta, "ownerId">;
   outbox!: EntityTable<OutboxEntry, "seq">;
   syncConflicts!: EntityTable<SyncConflictRecord, "id">;
@@ -208,6 +244,11 @@ class FinanceOfflineDatabase extends Dexie {
     this.version(4).stores({
       dailyBudgetLimits: "&[ownerId+effective_date], ownerId",
       dailyBudgetExpenses: "&[ownerId+id], ownerId, [ownerId+expense_date]",
+    });
+    // v5 adds the isolated Subscriptions Tracker tables.
+    this.version(5).stores({
+      subscriptions: "&[ownerId+id], ownerId, [ownerId+lifecycle], [ownerId+next_payment_date]",
+      subscriptionPayments: "&[ownerId+id], ownerId, [ownerId+subscription_id], [ownerId+subscription_id+due_date]",
     });
   }
 }

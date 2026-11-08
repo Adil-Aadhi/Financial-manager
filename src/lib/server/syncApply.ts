@@ -14,6 +14,14 @@ import {
   validateDailyLimitInput,
 } from "@/lib/dailyBudget";
 import type { createClient } from "@/lib/supabase/server";
+import {
+  addBillingCycle,
+  isBillingCycle,
+  isSubscriptionIcon,
+  isSubscriptionLifecycle,
+  sameMoney,
+  validateSubscriptionInput,
+} from "@/lib/subscriptions";
 import { countCategoryUsage, validateTransactionInput } from "@/lib/server/validation";
 import {
   isAmbiguousLegacyTransactionDateUpdate,
@@ -106,7 +114,7 @@ function isOperationShape(op: SyncOperation) {
     !!op &&
     typeof op.opId === "string" &&
     typeof op.ownerId === "string" &&
-    ["transaction", "account", "category", "budget", "daily_expense", "daily_limit"].includes(op.entity) &&
+    ["transaction", "account", "category", "budget", "daily_expense", "daily_limit", "subscription", "subscription_payment"].includes(op.entity) &&
     ["CREATE", "UPDATE", "DELETE"].includes(op.op) &&
     typeof op.entityId === "string" &&
     (op.entity === "budget"
@@ -195,6 +203,10 @@ async function applyOne(supabase: ServerClient, userId: string, op: SyncOperatio
       return applyDailyExpense(supabase, userId, op, editedAt, now);
     case "daily_limit":
       return applyDailyLimit(supabase, userId, op, editedAt, now);
+    case "subscription":
+      return applySubscription(supabase, userId, op, editedAt);
+    case "subscription_payment":
+      return applySubscriptionPayment(supabase, userId, op, editedAt);
   }
 }
 
@@ -716,4 +728,179 @@ async function applyDailyLimit(
   if (saved.error) return fromDbError(op, saved.error, DAILY_MIGRATION_MESSAGES);
   const conflict = row ? lastWriteWins(row.updated_at, op.baseUpdatedAt, editedAt).conflict : undefined;
   return done(op, { conflict, serverUpdatedAt: editedAt });
+}
+
+/* ------------------------------------------------------------------ subscriptions tracker */
+// These handlers only access subscriptions / subscription_payments.
+
+const SUBSCRIPTION_MIGRATION_MESSAGE = "Run the subscriptions migration before using subscriptions.";
+const SUBSCRIPTION_MIGRATION_MESSAGES = { "42P01": SUBSCRIPTION_MIGRATION_MESSAGE, PGRST205: SUBSCRIPTION_MIGRATION_MESSAGE };
+const SUBSCRIPTION_FIELDS = ["name", "icon", "amount", "currency", "billing_cycle", "billing_anchor_day", "start_date", "next_payment_date", "lifecycle", "notes"] as const;
+const SUBSCRIPTION_SELECT = "id, user_id, name, icon, amount, currency, billing_cycle, billing_anchor_day, start_date, next_payment_date, lifecycle, notes, created_at, updated_at";
+const SUBSCRIPTION_MISSING = "This subscription no longer exists.";
+
+function subscriptionColumns(source: Row) {
+  const notes = typeof source.notes === "string" ? source.notes.trim() : "";
+  return {
+    name: typeof source.name === "string" ? source.name.trim() : "",
+    icon: String(source.icon ?? ""),
+    amount: roundAmount(Number(source.amount)),
+    currency: String(source.currency ?? "").toUpperCase(),
+    billing_cycle: String(source.billing_cycle ?? ""),
+    billing_anchor_day: Number(source.billing_anchor_day),
+    start_date: String(source.start_date ?? ""),
+    next_payment_date: String(source.next_payment_date ?? ""),
+    lifecycle: String(source.lifecycle ?? ""),
+    notes: notes || null,
+  };
+}
+
+type SubscriptionColumns = ReturnType<typeof subscriptionColumns>;
+
+function subscriptionError(cols: SubscriptionColumns) {
+  if (!isBillingCycle(cols.billing_cycle)) return "Choose a supported billing cycle.";
+  if (!isSubscriptionIcon(cols.icon)) return "Choose a valid subscription icon.";
+  if (!isSubscriptionLifecycle(cols.lifecycle)) return "Choose a valid subscription state.";
+  if (!Number.isInteger(cols.billing_anchor_day) || cols.billing_anchor_day < 1 || cols.billing_anchor_day > 31) return "Choose a valid billing date.";
+  if (!isDateKey(cols.start_date)) return "Choose a valid start date.";
+  return validateSubscriptionInput({
+    name: cols.name,
+    icon: cols.icon,
+    amount: cols.amount,
+    currency: cols.currency,
+    billingCycle: cols.billing_cycle,
+    nextPaymentDate: cols.next_payment_date,
+    notes: cols.notes ?? "",
+  });
+}
+
+function sameSubscription(a: SubscriptionColumns, b: SubscriptionColumns) {
+  return a.name === b.name && a.icon === b.icon && sameMoney(a.amount, b.amount) && a.currency === b.currency &&
+    a.billing_cycle === b.billing_cycle && a.billing_anchor_day === b.billing_anchor_day &&
+    a.start_date === b.start_date && a.next_payment_date === b.next_payment_date &&
+    a.lifecycle === b.lifecycle && a.notes === b.notes;
+}
+
+async function applySubscription(
+  supabase: ServerClient,
+  userId: string,
+  op: SyncOperation,
+  editedAt: string
+): Promise<SyncOpResult> {
+  const { row, error } = await loadOwnRow(supabase, "subscriptions", SUBSCRIPTION_SELECT, userId, op.entityId);
+  if (error) return fromDbError(op, error, SUBSCRIPTION_MIGRATION_MESSAGES);
+
+  if (op.op === "CREATE") {
+    if (row) return already(op, (row.updated_at as string) ?? null);
+    const cols = subscriptionColumns(pick(op.payload, SUBSCRIPTION_FIELDS));
+    const invalid = subscriptionError(cols);
+    if (invalid) return rejected(op, invalid);
+    const createdAt = resolveEditedAt(String(op.payload.created_at ?? editedAt), new Date(editedAt));
+    const insert = await supabase.from("subscriptions").insert({
+      id: op.entityId, user_id: userId, ...cols, created_at: createdAt, updated_at: editedAt,
+    });
+    if (insert.error) {
+      if (insert.error.code === "23505") {
+        const again = await loadOwnRow(supabase, "subscriptions", "id, updated_at", userId, op.entityId);
+        if (again.row) return already(op, (again.row.updated_at as string) ?? null);
+      }
+      return fromDbError(op, insert.error, SUBSCRIPTION_MIGRATION_MESSAGES);
+    }
+    return done(op, { serverUpdatedAt: editedAt });
+  }
+
+  if (op.op === "UPDATE") {
+    if (!row) return rejected(op, SUBSCRIPTION_MISSING);
+    const current = subscriptionColumns(row);
+    const next = subscriptionColumns({ ...row, ...pick(op.payload, SUBSCRIPTION_FIELDS) });
+    if (sameSubscription(current, next)) return already(op, (row.updated_at as string) ?? null);
+    const invalid = subscriptionError(next);
+    if (invalid) return rejected(op, invalid);
+    const lww = lastWriteWins(row.updated_at, op.baseUpdatedAt, editedAt);
+    if (!lww.apply) return done(op, { conflict: lww.conflict, serverUpdatedAt: (row.updated_at as string) ?? null });
+    const update = await supabase.from("subscriptions").update({ ...next, updated_at: editedAt })
+      .eq("id", op.entityId).eq("user_id", userId).select("id").maybeSingle();
+    if (update.error) return fromDbError(op, update.error, SUBSCRIPTION_MIGRATION_MESSAGES);
+    if (!update.data) return rejected(op, SUBSCRIPTION_MISSING);
+    return done(op, { conflict: lww.conflict, serverUpdatedAt: editedAt });
+  }
+
+  if (!row) return already(op, null);
+  const lww = lastWriteWins(row.updated_at, op.baseUpdatedAt, editedAt);
+  if (!lww.apply) return done(op, { conflict: lww.conflict, serverUpdatedAt: (row.updated_at as string) ?? null });
+  const removed = await supabase.from("subscriptions").delete().eq("id", op.entityId).eq("user_id", userId).select("id").maybeSingle();
+  if (removed.error) return fromDbError(op, removed.error, SUBSCRIPTION_MIGRATION_MESSAGES);
+  return done(op, { conflict: lww.conflict, serverUpdatedAt: null });
+}
+
+async function applySubscriptionPayment(
+  supabase: ServerClient,
+  userId: string,
+  op: SyncOperation,
+  editedAt: string
+): Promise<SyncOpResult> {
+  const subscriptionId = String(op.payload.subscription_id ?? "");
+  const dueDate = String(op.payload.due_date ?? "");
+  if (!UUID.test(subscriptionId) || !isDateKey(dueDate)) return rejected(op, "This payment is invalid.");
+  const { row: subscription, error: subscriptionLoadError } = await loadOwnRow(
+    supabase, "subscriptions", SUBSCRIPTION_SELECT, userId, subscriptionId
+  );
+  if (subscriptionLoadError) return fromDbError(op, subscriptionLoadError, SUBSCRIPTION_MIGRATION_MESSAGES);
+  if (!subscription) return rejected(op, SUBSCRIPTION_MISSING);
+  const cycle = subscription.billing_cycle;
+  if (!isBillingCycle(cycle)) return rejected(op, "This subscription has an invalid billing cycle.");
+  const nextDate = addBillingCycle(dueDate, cycle, Number(subscription.billing_anchor_day));
+  const paymentResult = await loadOwnRow(
+    supabase, "subscription_payments", "id, user_id, subscription_id, due_date, paid_at, updated_at", userId, op.entityId
+  );
+  if (paymentResult.error) return fromDbError(op, paymentResult.error, SUBSCRIPTION_MIGRATION_MESSAGES);
+  const payment = paymentResult.row;
+
+  if (op.op === "DELETE") {
+    const expectedNext = nextDate;
+    if (String(subscription.next_payment_date) !== expectedNext && String(subscription.next_payment_date) !== dueDate) {
+      return rejected(op, "Only the most recently confirmed payment can be undone.");
+    }
+    if (payment) {
+      const removed = await supabase.from("subscription_payments").delete()
+        .eq("id", op.entityId).eq("user_id", userId).select("id").maybeSingle();
+      if (removed.error) return fromDbError(op, removed.error, SUBSCRIPTION_MIGRATION_MESSAGES);
+    }
+    if (String(subscription.next_payment_date) !== dueDate) {
+      const rolledBack = await supabase.from("subscriptions")
+        .update({ next_payment_date: dueDate, updated_at: editedAt })
+        .eq("id", subscriptionId).eq("user_id", userId).select("id").maybeSingle();
+      if (rolledBack.error) return fromDbError(op, rolledBack.error, SUBSCRIPTION_MIGRATION_MESSAGES);
+      if (!rolledBack.data) return rejected(op, SUBSCRIPTION_MISSING);
+    }
+    return done(op, { serverUpdatedAt: null });
+  }
+
+  if (String(subscription.lifecycle) !== "active") return rejected(op, "Resume this subscription before marking it paid.");
+  if (!payment && String(subscription.next_payment_date) !== dueDate) {
+    return rejected(op, "This billing cycle is no longer current.");
+  }
+  if (!payment) {
+    const paidAt = resolveEditedAt(String(op.payload.paid_at ?? editedAt), new Date(editedAt));
+    const inserted = await supabase.from("subscription_payments").insert({
+      id: op.entityId,
+      user_id: userId,
+      subscription_id: subscriptionId,
+      due_date: dueDate,
+      paid_at: paidAt,
+      created_at: paidAt,
+      updated_at: editedAt,
+    });
+    if (inserted.error && inserted.error.code !== "23505") {
+      return fromDbError(op, inserted.error, SUBSCRIPTION_MIGRATION_MESSAGES);
+    }
+  }
+  if (String(subscription.next_payment_date) !== nextDate) {
+    const advanced = await supabase.from("subscriptions")
+      .update({ next_payment_date: nextDate, updated_at: editedAt })
+      .eq("id", subscriptionId).eq("user_id", userId).select("id").maybeSingle();
+    if (advanced.error) return fromDbError(op, advanced.error, SUBSCRIPTION_MIGRATION_MESSAGES);
+    if (!advanced.data) return rejected(op, SUBSCRIPTION_MISSING);
+  }
+  return payment ? already(op, (payment.updated_at as string) ?? null) : done(op, { serverUpdatedAt: editedAt });
 }

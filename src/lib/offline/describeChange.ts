@@ -57,5 +57,15 @@ export async function describeChange(entry: OutboxEntry): Promise<string> {
       return entry.op === "DELETE"
         ? `Removed the daily limit change from ${dateText(entry.entityId)}`
         : `Set the daily limit to ${amountText(payload.amount)} from ${dateText(entry.entityId)}`;
+    case "subscription": {
+      const stored = await offlineDb.subscriptions.get([entry.ownerId, entry.entityId]);
+      const name = String(payload.name ?? stored?.name ?? "a subscription");
+      if (entry.op === "DELETE") return `Deleted subscription “${name}”`;
+      return `${entry.op === "CREATE" ? "Added" : "Edited"} subscription “${name}”`;
+    }
+    case "subscription_payment":
+      return entry.op === "DELETE"
+        ? `Undid subscription payment from ${dateText(payload.due_date)}`
+        : `Marked subscription paid for ${dateText(payload.due_date)}`;
   }
 }

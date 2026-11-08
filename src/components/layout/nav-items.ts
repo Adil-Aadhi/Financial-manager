@@ -2,6 +2,7 @@ import {
   BarChart3,
   Home,
   ReceiptText,
+  Repeat2,
   Settings,
   Tags,
   Trash2,
@@ -19,6 +20,7 @@ export const DESKTOP_NAV_ITEMS: NavItem[] = [
   { label: "Home", href: "/home", icon: Home },
   { label: "Transactions", href: "/transactions", icon: ReceiptText },
   { label: "Categories", href: "/categories", icon: Tags },
+  { label: "Subscriptions", href: "/subscriptions", icon: Repeat2 },
   { label: "Reports", href: "/reports", icon: BarChart3 },
   { label: "Trash", href: "/trash", icon: Trash2 },
   { label: "Settings", href: "/settings", icon: Settings },
@@ -38,6 +40,7 @@ export const MOBILE_RIGHT_NAV_ITEMS: NavItem[] = [
 /** Items inside the mobile "More" menu. */
 export const MORE_NAV_ITEMS: NavItem[] = [
   { label: "Categories", href: "/categories", icon: Tags },
+  { label: "Subscriptions", href: "/subscriptions", icon: Repeat2 },
   { label: "Settings", href: "/settings", icon: Settings },
   { label: "Trash", href: "/trash", icon: Trash2 },
 ];

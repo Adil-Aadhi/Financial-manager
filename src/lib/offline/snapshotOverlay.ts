@@ -5,6 +5,8 @@ import type {
   LocalDailyBudgetLimit,
   LocalMonthlyBudget,
   LocalTransaction,
+  LocalSubscription,
+  LocalSubscriptionPayment,
   OutboxEntry,
 } from "./db";
 import { isAmbiguousLegacyTransactionDateUpdate } from "@/lib/transactions";
@@ -17,6 +19,8 @@ export interface LocalSnapshotRows {
   /** Daily Budget Tracker rows. Optional so callers written before the feature still work. */
   dailyLimits?: LocalDailyBudgetLimit[];
   dailyExpenses?: LocalDailyBudgetExpense[];
+  subscriptions?: LocalSubscription[];
+  subscriptionPayments?: LocalSubscriptionPayment[];
 }
 
 function byId<T extends { id: string }>(rows: T[]) {
@@ -43,6 +47,10 @@ export function overlayOutbox(
   );
   const dailyExpenses = byId(server.dailyExpenses ?? []);
   const previousDailyExpenses = byId(previous.dailyExpenses ?? []);
+  const subscriptions = byId(server.subscriptions ?? []);
+  const previousSubscriptions = byId(previous.subscriptions ?? []);
+  const subscriptionPayments = byId(server.subscriptionPayments ?? []);
+  const previousSubscriptionPayments = byId(previous.subscriptionPayments ?? []);
 
   for (const entry of [...entries].sort((left, right) => (left.seq ?? 0) - (right.seq ?? 0))) {
     if (entry.ownerId !== ownerId) continue;
@@ -149,6 +157,53 @@ export function overlayOutbox(
       continue;
     }
 
+    if (entry.entity === "subscription") {
+      if (entry.op === "DELETE") {
+        subscriptions.delete(entry.entityId);
+        for (const [id, payment] of subscriptionPayments) {
+          if (payment.subscription_id === entry.entityId) subscriptionPayments.delete(id);
+        }
+        continue;
+      }
+      const base = subscriptions.get(entry.entityId) ?? previousSubscriptions.get(entry.entityId);
+      if (base || entry.op === "CREATE") {
+        subscriptions.set(entry.entityId, {
+          ...(base ?? ({} as LocalSubscription)),
+          ...entry.payload,
+          ownerId,
+          id: entry.entityId,
+          user_id: ownerId,
+        } as LocalSubscription);
+      }
+      continue;
+    }
+
+    if (entry.entity === "subscription_payment") {
+      const payload = entry.payload;
+      const subscriptionId = String(payload.subscription_id ?? "");
+      if (entry.op === "DELETE") {
+        subscriptionPayments.delete(entry.entityId);
+        const sub = subscriptions.get(subscriptionId) ?? previousSubscriptions.get(subscriptionId);
+        if (sub && typeof payload.due_date === "string") {
+          subscriptions.set(subscriptionId, { ...sub, next_payment_date: payload.due_date } as LocalSubscription);
+        }
+        continue;
+      }
+      const base = subscriptionPayments.get(entry.entityId) ?? previousSubscriptionPayments.get(entry.entityId);
+      subscriptionPayments.set(entry.entityId, {
+        ...(base ?? ({} as LocalSubscriptionPayment)),
+        ...payload,
+        ownerId,
+        id: entry.entityId,
+        user_id: ownerId,
+      } as LocalSubscriptionPayment);
+      const sub = subscriptions.get(subscriptionId) ?? previousSubscriptions.get(subscriptionId);
+      if (sub && typeof payload.next_payment_date === "string") {
+        subscriptions.set(subscriptionId, { ...sub, next_payment_date: payload.next_payment_date } as LocalSubscription);
+      }
+      continue;
+    }
+
     if (entry.op === "DELETE") {
       budget = null;
     } else {
@@ -169,5 +224,7 @@ export function overlayOutbox(
     budget,
     dailyLimits: [...dailyLimits.values()],
     dailyExpenses: [...dailyExpenses.values()],
+    subscriptions: [...subscriptions.values()],
+    subscriptionPayments: [...subscriptionPayments.values()],
   };
 }
