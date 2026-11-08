@@ -91,7 +91,7 @@ export function EditAccountModal({
         return;
       }
 
-      if (!result.queued) markOfflineDataStale();
+      if (!result.queued) markOfflineDataStale(["accounts", "dashboard"]);
       onSaved?.(accountGroup);
       onClose();
     });
@@ -201,7 +201,7 @@ export function DeleteAccountModal({
         return;
       }
 
-      if (!result.queued) markOfflineDataStale();
+      if (!result.queued) markOfflineDataStale(["accounts", "dashboard"]);
       onClose();
     });
   };

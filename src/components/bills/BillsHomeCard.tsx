@@ -5,6 +5,7 @@ import { ReceiptText } from "lucide-react";
 import { BillCard } from "./BillCard";
 import { Card, CardLink } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { SectionRefreshIndicator } from "@/components/ui/SectionRefreshIndicator";
 import { formatMoney } from "@/lib/format";
 import type { SupportedCurrency } from "@/lib/supabase/profile";
 import type { BillsServerData } from "@/lib/supabase/bills";
@@ -19,7 +20,7 @@ export function BillsHomeCard({ ownerId, currency, server, serverToday }: { owne
   const estimate = active.filter((bill) => bill.currency === currency).reduce((sum, bill) => sum + billMonthlyEstimate(bill), 0);
   const overdue = active.filter((bill) => billStatus(bill, today) === "overdue").length;
   const pending = active.filter((bill) => billStatus(bill, today) === "pending").length;
-  return <Card title="Upcoming Bills" description={active.length ? `${active.length} active · ${formatMoney(estimate, currency, { compact: true })}/month estimated${pending || overdue ? ` · ${pending} due · ${overdue} overdue` : ""}` : undefined} action={<CardLink href="/bills">View all</CardLink>}>
+  return <Card title="Upcoming Bills" description={active.length ? `${active.length} active · ${formatMoney(estimate, currency, { compact: true })}/month estimated${pending || overdue ? ` · ${pending} due · ${overdue} overdue` : ""}` : undefined} action={<><SectionRefreshIndicator scope="bills" className="absolute right-20 top-4 sm:top-5" /><CardLink href="/bills">View all</CardLink></>}>
     {!data.available ? <EmptyState icon={<ReceiptText className="h-5 w-5" />} title="Bills need setup" description="Apply the Bills database migration to enable this feature." /> : upcoming.length ? <div className="grid gap-3 lg:grid-cols-3">{upcoming.map((bill) => <Link key={bill.id} href={`/bills?selected=${bill.id}`} className="rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"><BillCard bill={bill} today={today} compact /></Link>)}</div> : <EmptyState icon={<ReceiptText className="h-5 w-5" />} title="No active bills" description="Track bills without changing balances or creating transactions." action={<Link href="/bills?add=1" className="text-xs font-semibold text-accent">Add bill</Link>} />}
   </Card>;
 }

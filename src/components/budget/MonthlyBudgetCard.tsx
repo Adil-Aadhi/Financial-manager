@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { CircleAlert, CircleCheck, Pencil, Target, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { SectionRefreshIndicator } from "@/components/ui/SectionRefreshIndicator";
 import { cn } from "@/lib/cn";
 import { formatPercent, getBudgetStatus, type BudgetLevel } from "@/lib/budget";
 import { formatMoney } from "@/lib/format";
@@ -61,6 +62,7 @@ export function MonthlyBudgetCard({
         Monthly budget
       </span>
       <div className="flex items-center gap-1.5">
+        <SectionRefreshIndicator scope="monthly-budget" />
         <span className="rounded-full border border-line bg-glass-hover px-2.5 py-0.5 text-[11px] font-semibold text-fg-muted">
           {monthLabel}
         </span>

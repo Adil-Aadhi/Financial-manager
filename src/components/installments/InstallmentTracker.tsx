@@ -5,6 +5,7 @@ import { AlertCircle, CalendarClock, CheckCircle2, Clock3, Layers, Plus, Search 
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { SectionRefreshIndicator } from "@/components/ui/SectionRefreshIndicator";
 import { cn } from "@/lib/cn";
 import { summarizePlan, type InstallmentPlanSummary } from "@/lib/installments";
 import type { InstallmentsServerData } from "@/lib/supabase/installments";
@@ -97,7 +98,8 @@ export function InstallmentTracker({
       </div>
       {otherCurrencies > 0 && <p className="text-xs text-fg-subtle">{otherCurrencies} active plan{otherCurrencies === 1 ? " is" : "s are"} in another currency and not included in these totals.</p>}
 
-      <section className="glass glass-edge rounded-2xl p-4 sm:p-5">
+      <section className="glass glass-edge relative rounded-2xl p-4 sm:p-5">
+        <SectionRefreshIndicator scope="installments" className="absolute right-4 top-16 rounded-full bg-glass-strong px-2 py-1 sm:right-36 sm:top-5" />
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-lg font-semibold tracking-tight text-fg">Installment plans</h2>

@@ -14,6 +14,7 @@ import { Button, buttonBase, buttonSizes, buttonVariants } from "@/components/ui
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
+import { SectionRefreshIndicator } from "@/components/ui/SectionRefreshIndicator";
 import { cn } from "@/lib/cn";
 import { formatMoney } from "@/lib/format";
 import { managedTransactionHref, type ManagedTransactionInfo } from "@/lib/installments";
@@ -162,7 +163,8 @@ export function TransactionHistory({
 
   return (
     <>
-      <div className="space-y-4">
+      <div className="relative space-y-4">
+        <SectionRefreshIndicator scope="transactions" className="absolute -top-5 right-0" />
         {message && (
           <Alert variant="success" onClose={() => setMessage(null)}>
             {message}
@@ -620,7 +622,7 @@ function DeleteTransactionModal({
       onClose();
       onDeleted(result.queued);
       if (result.queued) return;
-      markOfflineDataStale();
+      markOfflineDataStale(["transactions", "accounts", "dashboard", "installments"]);
       router.refresh();
     });
   };

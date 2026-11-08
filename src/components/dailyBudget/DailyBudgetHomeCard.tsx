@@ -4,6 +4,7 @@ import React from "react";
 import Link from "next/link";
 import { ArrowUpRight, CalendarDays } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { SectionRefreshIndicator } from "@/components/ui/SectionRefreshIndicator";
 import { calculateDailyBudgetToday } from "@/lib/dailyBudget";
 import { formatMoney } from "@/lib/format";
 import type { DailyBudgetServerData } from "@/lib/supabase/dailyBudget";
@@ -39,7 +40,7 @@ export function DailyBudgetHomeCard({
       aria-label="Open the daily budget tracker"
       className="group block rounded-3xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
     >
-      <section className="glass-strong glass-edge animate-rise overflow-hidden rounded-3xl p-4 transition-colors group-hover:border-line-strong sm:p-7">
+      <section className="glass-strong glass-edge relative animate-rise overflow-hidden rounded-3xl p-4 transition-colors group-hover:border-line-strong sm:p-7">
         <div className="pointer-events-none absolute -right-20 -bottom-24 h-56 w-56 rounded-full bg-[radial-gradient(circle,var(--aurora-3),transparent_70%)]" />
         <div className="relative flex items-center justify-between gap-3">
           <span className="flex items-center gap-2 text-xs font-medium text-fg-muted">
@@ -51,6 +52,7 @@ export function DailyBudgetHomeCard({
             <ArrowUpRight className="h-3 w-3" />
           </span>
         </div>
+        <SectionRefreshIndicator scope="daily-budget" className="absolute right-20 top-4 sm:right-24 sm:top-7" />
 
         {!data.available ? (
           <p className="relative mt-4 text-sm text-fg-muted">

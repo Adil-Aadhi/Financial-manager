@@ -22,7 +22,7 @@ export function Card({
   return (
     <section className={cn("glass glass-edge rounded-2xl", className)}>
       {(title || action) && (
-        <header className="flex items-start justify-between gap-3 px-4 pt-4 sm:px-5 sm:pt-5">
+        <header className="relative flex items-start justify-between gap-3 px-4 pt-4 sm:px-5 sm:pt-5">
           <div className="min-w-0">
             {title && <h2 className="text-[15px] font-semibold tracking-tight text-fg">{title}</h2>}
             {description && <p className="mt-0.5 truncate text-xs text-fg-subtle">{description}</p>}

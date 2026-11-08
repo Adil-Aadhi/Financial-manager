@@ -7,6 +7,7 @@ import { SubscriptionDetailsModal, SubscriptionFormModal } from "./SubscriptionM
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { SectionRefreshIndicator } from "@/components/ui/SectionRefreshIndicator";
 import { cn } from "@/lib/cn";
 import { formatMoney } from "@/lib/format";
 import type { SupportedCurrency } from "@/lib/supabase/profile";
@@ -68,7 +69,8 @@ export function SubscriptionTracker({
       </div>
       {otherCurrencyCount > 0 && <p className="text-xs text-fg-subtle">Monthly total includes {currency} subscriptions only; {otherCurrencyCount} active subscription{otherCurrencyCount === 1 ? " uses" : "s use"} another currency.</p>}
 
-      <section className="glass glass-edge rounded-2xl p-4 sm:p-5">
+      <section className="glass glass-edge relative rounded-2xl p-4 sm:p-5">
+        <SectionRefreshIndicator scope="subscriptions" className="absolute right-4 top-16 rounded-full bg-glass-strong px-2 py-1 sm:right-44 sm:top-5" />
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="relative min-w-0 flex-1 sm:max-w-sm">
             <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-subtle" />

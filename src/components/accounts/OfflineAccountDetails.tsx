@@ -6,6 +6,7 @@ import { ArrowDownLeft, ArrowUpRight, Landmark } from "lucide-react";
 import { TransactionHistory } from "@/components/transactions/TransactionHistory";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { SectionRefreshIndicator } from "@/components/ui/SectionRefreshIndicator";
 import { cn } from "@/lib/cn";
 import { managedTransactions, type ManagedTransactionInfo } from "@/lib/installments";
 import { formatMoney } from "@/lib/format";
@@ -166,7 +167,7 @@ export function OfflineAccountDetails({
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <section className="glass-strong glass-edge animate-rise overflow-hidden rounded-3xl p-4 sm:p-7">
+      <section className="glass-strong glass-edge relative animate-rise overflow-hidden rounded-3xl p-4 sm:p-7">
         <div className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full bg-[radial-gradient(circle,var(--aurora-1),transparent_70%)]" />
 
         <div className="relative flex items-center justify-between gap-3">
@@ -190,6 +191,7 @@ export function OfflineAccountDetails({
           {" · "}
           {transactions.length} transaction{transactions.length === 1 ? "" : "s"}
         </p>
+        <SectionRefreshIndicator scope={["accounts", "transactions", "installments"]} className="absolute right-4 top-14 sm:right-7 sm:top-16" />
 
         <dl className="relative mt-5 grid grid-cols-2 gap-2 sm:mt-6 sm:gap-3">
           <SummaryMetric
