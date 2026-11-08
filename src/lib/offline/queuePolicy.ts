@@ -1,6 +1,6 @@
 export interface QueuePolicyEntry {
   seq?: number;
-  entity: "transaction" | "account" | "category" | "budget" | "daily_expense" | "daily_limit" | "subscription" | "subscription_payment" | "bill" | "bill_payment";
+  entity: "transaction" | "account" | "category" | "budget" | "daily_expense" | "daily_limit" | "subscription" | "subscription_payment" | "bill" | "bill_payment" | "installment_plan" | "installment_payment";
   entityId: string;
   op: "CREATE" | "UPDATE" | "DELETE";
   payload: Record<string, unknown>;
@@ -65,6 +65,28 @@ export function dependsOn(entry: QueuePolicyEntry, earlier: QueuePolicyEntry) {
   }
 
   if (entry.entity === "bill_payment" && earlier.entity === "bill" && references(entry.payload, "bill_id", earlier.entityId)) return true;
+
+  // Installments: a payment needs its plan, the account it was paid from and (when linking) the
+  // transaction it references. Transactions created by a payment are written by that payment's
+  // operation, so later edits of such a transaction wait for it, and a plan delete waits for its
+  // payments.
+  if (entry.entity === "installment_payment") {
+    if (earlier.entity === "installment_plan" && references(entry.payload, "installment_plan_id", earlier.entityId)) return true;
+    if (earlier.entity === "account" && references(entry.payload, "account_id", earlier.entityId)) return true;
+    if (earlier.entity === "transaction" && references(entry.payload, "transaction_id", earlier.entityId)) return true;
+  }
+  if (entry.entity === "transaction" && earlier.entity === "installment_payment") {
+    if (references(earlier.payload, "transaction_id", entry.entityId)) return true;
+    if (references(earlier.payload, "previous_transaction_id", entry.entityId)) return true;
+  }
+  if (
+    entry.entity === "installment_plan" &&
+    entry.op === "DELETE" &&
+    earlier.entity === "installment_payment" &&
+    references(earlier.payload, "installment_plan_id", entry.entityId)
+  ) {
+    return true;
+  }
   if (entry.entity === "bill" && entry.op === "DELETE" && earlier.entity === "bill_payment" && references(earlier.payload, "bill_id", entry.entityId)) return true;
 
   return false;

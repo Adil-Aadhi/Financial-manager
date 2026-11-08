@@ -24,6 +24,7 @@ export const CATEGORY_ICON_OPTIONS = [
   { value: "notebook-pen", label: "Stationery" },
   { value: "settings", label: "Maintenance" },
   { value: "car-battery", label: "Vehicle maintenance" },
+  { value: "calendar-clock", label: "Installments" },
   { value: "circle-ellipsis", label: "Other" },
 ] as const;
 

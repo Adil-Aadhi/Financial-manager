@@ -1,6 +1,7 @@
 import type React from "react";
 import {
   Briefcase,
+  CalendarClock,
   Building2,
   Car,
   CarBattery,
@@ -49,6 +50,7 @@ const CATEGORY_ICONS: Record<string, LucideIcon> = {
   "notebook-pen": NotebookPen,
   settings: Settings,
   "car-battery": CarBattery,
+  "calendar-clock": CalendarClock,
   "circle-ellipsis": CircleEllipsis,
 };
 
@@ -75,6 +77,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   "notebook-pen": "violet",
   settings: "slate",
   "car-battery": "blue",
+  "calendar-clock": "violet",
   "circle-ellipsis": "slate",
 };
 

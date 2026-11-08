@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { validateTransactionInput } from "@/lib/server/validation";
+import { INSTALLMENT_MANAGED_MESSAGE } from "@/lib/installments";
+import { isInstallmentManagedTransaction, validateTransactionInput } from "@/lib/server/validation";
 import {
   isTransactionDateChange,
   type TransactionFormOptions,
@@ -45,6 +46,8 @@ function revalidateTransactionViews(accountIds: string[]) {
   revalidatePath("/home");
   revalidatePath("/transactions");
   revalidatePath("/reports");
+  // A manually linked installment payment follows its transaction (database trigger).
+  revalidatePath("/installments");
   for (const accountId of new Set(accountIds)) {
     if (accountId) revalidatePath(`/accounts/${accountId}`);
   }
@@ -147,6 +150,10 @@ export async function updateTransactionAction(
     return { success: false, error: "Transaction not found." };
   }
 
+  const managed = await isInstallmentManagedTransaction(supabase, user.id, input.transactionId);
+  if (managed === "error") return { success: false, error: "Unable to update this transaction." };
+  if (managed) return { success: false, error: INSTALLMENT_MANAGED_MESSAGE };
+
   const validationError = await validateTransactionInput(input, user.id, supabase);
   if (validationError) return { success: false, error: validationError };
 
@@ -198,6 +205,10 @@ export async function deleteTransactionAction(
   if (existingError || !existing) {
     return { success: false, error: "Transaction not found." };
   }
+
+  const managed = await isInstallmentManagedTransaction(supabase, user.id, transactionId);
+  if (managed === "error") return { success: false, error: "Unable to delete this transaction." };
+  if (managed) return { success: false, error: INSTALLMENT_MANAGED_MESSAGE };
 
   const { data, error } = await supabase
     .from("transactions")

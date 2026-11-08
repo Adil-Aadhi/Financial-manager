@@ -7,6 +7,7 @@ import { TransactionHistory } from "@/components/transactions/TransactionHistory
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { cn } from "@/lib/cn";
+import { managedTransactions, type ManagedTransactionInfo } from "@/lib/installments";
 import { formatMoney } from "@/lib/format";
 import { offlineDb } from "@/lib/offline/db";
 import { useOfflineRefresh } from "@/lib/offline/useOfflineRefresh";
@@ -36,6 +37,7 @@ export function OfflineAccountDetails({
   account: serverAccount,
   transactions: serverTransactions,
   categories: serverCategories,
+  managedTransactions: serverManaged = [],
   fallbackCurrency,
   serverMissing = false,
 }: {
@@ -43,6 +45,8 @@ export function OfflineAccountDetails({
   account: OfflineAccountDetailsAccount;
   transactions: TransactionRecord[];
   categories: TransactionCategoryOption[];
+  /** Installment-generated expenses (read only here; changed from the Installments page). */
+  managedTransactions?: ManagedTransactionInfo[];
   fallbackCurrency: SupportedCurrency;
   /** The server has no such account (e.g. created offline, not synced yet): show only the local copy. */
   serverMissing?: boolean;
@@ -63,13 +67,15 @@ export function OfflineAccountDetails({
     const meta = await offlineDb.syncMeta.get(ownerId);
     if (!meta?.totalsMatch) return null;
 
-    const [account, transactionRows, categoryRows] = await Promise.all([
+    const [account, transactionRows, categoryRows, installmentPayments, installmentPlans] = await Promise.all([
       offlineDb.accounts.get([ownerId, serverAccount.id]),
       offlineDb.transactions
         .where("[ownerId+account_id]")
         .equals([ownerId, serverAccount.id])
         .toArray(),
       offlineDb.categories.where("ownerId").equals(ownerId).toArray(),
+      offlineDb.installmentPayments.where("ownerId").equals(ownerId).toArray(),
+      offlineDb.installmentPlans.where("ownerId").equals(ownerId).toArray(),
     ]);
     if (!account || account.deleted_at) return null;
 
@@ -122,6 +128,7 @@ export function OfflineAccountDetails({
       },
       transactions,
       categories,
+      managed: managedTransactions(installmentPayments, installmentPlans),
     };
   }, [ownerId, serverAccount.id]);
   useLocalContentMark(localSnapshot != null); // TEMPORARY perf (Step 3 Phase 0)
@@ -141,6 +148,7 @@ export function OfflineAccountDetails({
 
   const account = localSnapshot?.account ?? serverAccount;
   const transactions = localSnapshot?.transactions ?? serverTransactions;
+  const managed = localSnapshot?.managed ?? new Map(serverManaged.map((info) => [info.transactionId, info]));
   const categories = localSnapshot?.categories ?? serverCategories;
   const totalIncome = transactions.reduce(
     (sum, transaction) =>
@@ -200,7 +208,7 @@ export function OfflineAccountDetails({
       </section>
 
       <Card title="Activity" bodyClassName="pt-3">
-        <TransactionHistory transactions={transactions} currency={currency} categories={categories} />
+        <TransactionHistory transactions={transactions} currency={currency} categories={categories} managed={managed} />
       </Card>
     </div>
   );

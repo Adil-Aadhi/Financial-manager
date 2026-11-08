@@ -68,6 +68,7 @@ export function OfflineHomeDashboard({
   dailyBudgetCard,
   subscriptionsCard,
   billsCard,
+  installmentsCard,
 }: {
   ownerId: string;
   currency: SupportedCurrency;
@@ -79,6 +80,8 @@ export function OfflineHomeDashboard({
   subscriptionsCard?: React.ReactNode;
   /** Independent bill reminders, rendered directly below Subscriptions. */
   billsCard?: React.ReactNode;
+  /** Independent installment plans, rendered directly below Bills. */
+  installmentsCard?: React.ReactNode;
 }) {
   const serverVersion = [
     ...serverSnapshot.accounts.map((account) => `${account.id}:${account.opening_balance}:${account.deleted_at ?? ""}:${normalizeIncludeInSummary(account.include_in_summary)}`),
@@ -164,6 +167,7 @@ export function OfflineHomeDashboard({
       dailyBudgetCard={dailyBudgetCard}
       subscriptionsCard={subscriptionsCard}
       billsCard={billsCard}
+      installmentsCard={installmentsCard}
     />
   );
 }
@@ -179,6 +183,7 @@ function HomeDashboard({
   dailyBudgetCard,
   subscriptionsCard,
   billsCard,
+  installmentsCard,
 }: {
   snapshot: HomeSnapshot;
   currency: SupportedCurrency;
@@ -186,6 +191,8 @@ function HomeDashboard({
   dailyBudgetCard?: React.ReactNode;
   subscriptionsCard?: React.ReactNode;
   billsCard?: React.ReactNode;
+  /** Independent installment plans, rendered directly below Bills. */
+  installmentsCard?: React.ReactNode;
 }) {
   const data = useMemo(() => calculateDashboard(snapshot, currency, month.prefix), [snapshot, currency, month.prefix]);
 
@@ -231,6 +238,8 @@ function HomeDashboard({
       {subscriptionsCard}
 
       {billsCard}
+
+      {installmentsCard}
 
       <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-3">
         <div className="space-y-4 sm:space-y-5 lg:col-span-2">

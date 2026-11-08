@@ -8,6 +8,7 @@ import {
 import { DailyBudgetHomeCard } from "@/components/dailyBudget/DailyBudgetHomeCard";
 import { SubscriptionHomeCard } from "@/components/subscriptions/SubscriptionHomeCard";
 import { BillsHomeCard } from "@/components/bills/BillsHomeCard";
+import { InstallmentsHomeCard } from "@/components/installments/InstallmentsHomeCard";
 import { AppShell, PageHeader } from "@/components/layout/AppShell";
 import { dailyBudgetToday, monthFirstDay, monthOfDate } from "@/lib/dailyBudget";
 import { getDailyBudgetServerData } from "@/lib/supabase/dailyBudget";
@@ -16,6 +17,7 @@ import { getMonthlyBudgetOverview } from "@/lib/supabase/budget";
 import { getAuthenticatedUserProfile } from "@/lib/supabase/profile";
 import { getSubscriptionsServerData } from "@/lib/supabase/subscriptions";
 import { getBillsServerData } from "@/lib/supabase/bills";
+import { getInstallmentsServerData } from "@/lib/supabase/installments";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeTransactionDate } from "@/lib/transactions";
 
@@ -35,7 +37,7 @@ export default async function HomePage() {
   const supabase = await createClient();
   const today = dailyBudgetToday();
 
-  const [accountsResult, transactionsResult, budget, dailyBudget, subscriptions, bills] = await Promise.all([
+  const [accountsResult, transactionsResult, budget, dailyBudget, subscriptions, bills, installments] = await Promise.all([
     supabase
       .from("accounts")
       .select("id, name, opening_balance, currency, include_in_summary, deleted_at, created_at")
@@ -52,6 +54,7 @@ export default async function HomePage() {
     getDailyBudgetServerData(supabase, user.id, monthFirstDay(monthOfDate(today))),
     getSubscriptionsServerData(supabase, user.id),
     getBillsServerData(supabase, user.id),
+    getInstallmentsServerData(supabase, user.id),
   ]);
 
   let accounts: HomeAccount[] = (accountsResult.data ?? []).map((account) => ({
@@ -147,6 +150,9 @@ export default async function HomePage() {
         }
         billsCard={
           <BillsHomeCard ownerId={user.id} currency={profile.default_currency} server={bills} serverToday={today} />
+        }
+        installmentsCard={
+          <InstallmentsHomeCard ownerId={user.id} currency={profile.default_currency} server={installments} serverToday={today} />
         }
       />
     </AppShell>
