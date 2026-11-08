@@ -165,19 +165,33 @@
   --animate-float: float 7s ease-in-out infinite;
   --animate-shake: shake 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
   --animate-sheet: sheet 0.38s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-sheet-out: sheet-out 0.26s cubic-bezier(0.4, 0, 1, 1) both;
+  --animate-fall: fall 0.24s cubic-bezier(0.4, 0, 1, 1) both;
+  --animate-fade-out: fade-out 0.22s ease-in both;
 
   @keyframes sheet {
     from { transform: translateY(100%); }
     to { transform: none; }
+  }
+  @keyframes sheet-out {
+    to { transform: translateY(100%); }
   }
 
   @keyframes rise {
     from { opacity: 0; transform: translateY(14px) scale(0.985); }
     to { opacity: 1; transform: none; }
   }
+  @keyframes fall {
+    from { opacity: 1; transform: none; }
+    to { opacity: 0; transform: translateY(14px) scale(0.985); }
+  }
   @keyframes fade {
     from { opacity: 0; }
     to { opacity: 1; }
+  }
+  @keyframes fade-out {
+    from { opacity: 1; }
+    to { opacity: 0; }
   }
   @keyframes aurora {
     0% { transform: translate3d(0, 0, 0) scale(1); }

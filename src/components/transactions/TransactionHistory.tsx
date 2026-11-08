@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState, useTransition } from "react";
+import React, { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { CalendarDays, Lock, Pencil, Search, SlidersHorizontal, Trash2, X } from "lucide-react";
@@ -27,6 +27,16 @@ import {
 } from "@/lib/transactions";
 
 type TransactionFilter = "all" | TransactionType;
+const SWIPE_ACTION_WIDTH = 84;
+const SWIPE_REVEAL_THRESHOLD = 36;
+
+interface SwipeGesture {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  startOffset: number;
+  axis: "horizontal" | "vertical" | null;
+}
 
 function localDateKey(offsetDays = 0) {
   return normalizeTransactionDate(
@@ -432,6 +442,10 @@ function TransactionRow({
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const [swipeOffset, setSwipeOffset] = useState(0);
+  const [isSwiping, setIsSwiping] = useState(false);
+  const gestureRef = useRef<SwipeGesture | null>(null);
+  const suppressClickRef = useRef(false);
   const income = transaction.type === "income";
   const title = transaction.description || transaction.category?.name || (income ? "Income" : "Expense");
   const time = formatTransactionTime(transaction.transaction_time);
@@ -439,13 +453,105 @@ function TransactionRow({
     .filter(Boolean)
     .join(" · ");
 
+  const swipeEnabled = () => !managed && window.matchMedia("(max-width: 639px)").matches;
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (!swipeEnabled()) return;
+    gestureRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startOffset: swipeOffset,
+      axis: null,
+    };
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const gesture = gestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+
+    const deltaX = event.clientX - gesture.startX;
+    const deltaY = event.clientY - gesture.startY;
+    if (!gesture.axis) {
+      if (Math.max(Math.abs(deltaX), Math.abs(deltaY)) < 6) return;
+      gesture.axis = Math.abs(deltaX) > Math.abs(deltaY) * 1.2 ? "horizontal" : "vertical";
+      if (gesture.axis === "horizontal") {
+        event.currentTarget.setPointerCapture(event.pointerId);
+        setIsSwiping(true);
+      }
+    }
+
+    if (gesture.axis !== "horizontal") return;
+    event.preventDefault();
+    setSwipeOffset(Math.max(-SWIPE_ACTION_WIDTH, Math.min(0, gesture.startOffset + deltaX)));
+  };
+
+  const finishSwipe = (event: React.PointerEvent<HTMLButtonElement>, cancelled = false) => {
+    const gesture = gestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    gestureRef.current = null;
+    setIsSwiping(false);
+
+    if (gesture.axis !== "horizontal") return;
+    suppressClickRef.current = true;
+    requestAnimationFrame(() => {
+      suppressClickRef.current = false;
+    });
+
+    if (cancelled) {
+      setSwipeOffset(gesture.startOffset);
+      return;
+    }
+
+    const deltaX = event.clientX - gesture.startX;
+    const finalOffset = Math.max(-SWIPE_ACTION_WIDTH, Math.min(0, gesture.startOffset + deltaX));
+    setSwipeOffset(finalOffset <= -SWIPE_REVEAL_THRESHOLD ? -SWIPE_ACTION_WIDTH : 0);
+  };
+
+  const revealed = swipeOffset < 0;
+
   return (
-    <li className="group relative flex items-center">
+    <li className="group relative flex items-center overflow-hidden">
+      {!managed && (
+        <div
+          className="absolute inset-y-0 right-0 flex w-[84px] items-stretch border-l border-danger/20 bg-danger/12 sm:hidden"
+          aria-hidden={!revealed}
+        >
+          <button
+            type="button"
+            tabIndex={revealed ? 0 : -1}
+            onClick={() => {
+              setSwipeOffset(0);
+              onDelete();
+            }}
+            aria-label={`Delete ${title}`}
+            className="flex w-full touch-manipulation cursor-pointer flex-col items-center justify-center gap-1 text-[11px] font-semibold text-danger"
+          >
+            <Trash2 className="h-4 w-4" aria-hidden="true" />
+            Delete
+          </button>
+        </div>
+      )}
       <button
         type="button"
-        onClick={onEdit}
+        onClick={() => {
+          if (suppressClickRef.current) return;
+          onEdit();
+        }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={(event) => finishSwipe(event)}
+        onPointerCancel={(event) => finishSwipe(event, true)}
         aria-label={managed ? `View ${title} (managed by Installments)` : `Edit ${title}`}
-        className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-glass-hover active:bg-glass-hover sm:px-4 sm:py-3"
+        style={swipeOffset ? { transform: `translate3d(${swipeOffset}px, 0, 0)` } : undefined}
+        className={cn(
+          "relative z-10 flex min-w-0 flex-1 touch-pan-y cursor-pointer items-center gap-3 bg-canvas px-3 py-2.5 text-left hover:bg-glass-hover active:bg-glass-hover sm:bg-transparent sm:px-4 sm:py-3",
+          !isSwiping && "transition-[transform,background-color] duration-200"
+        )}
       >
         <CategoryTile icon={transaction.category?.icon} size="md" />
         <div className="min-w-0 flex-1">

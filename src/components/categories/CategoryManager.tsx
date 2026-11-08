@@ -59,7 +59,7 @@ export function CategoryManager({
                     : "text-fg-muted hover:bg-glass-hover hover:text-fg"
                 )}
               >
-                <span>{type === "income" ? "Income Categories" : "Expense Categories"}</span>
+                <span>{type === "income" ? "Income" : "Expense"}</span>
                 <span className="rounded-full border border-current/20 px-2 py-0.5 font-mono text-[10px]">
                   {counts[type]}
                 </span>

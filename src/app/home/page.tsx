@@ -134,6 +134,7 @@ export default async function HomePage() {
         serverSnapshot={{ accounts, transactions, budget }}
         dailyBudgetCard={
           <DailyBudgetHomeCard
+            key="daily-budget"
             ownerId={user.id}
             currency={profile.default_currency}
             server={dailyBudget}
@@ -142,6 +143,7 @@ export default async function HomePage() {
         }
         subscriptionsCard={
           <SubscriptionHomeCard
+            key="subscriptions"
             ownerId={user.id}
             currency={profile.default_currency}
             server={subscriptions}
@@ -149,10 +151,22 @@ export default async function HomePage() {
           />
         }
         billsCard={
-          <BillsHomeCard ownerId={user.id} currency={profile.default_currency} server={bills} serverToday={today} />
+          <BillsHomeCard
+            key="bills"
+            ownerId={user.id}
+            currency={profile.default_currency}
+            server={bills}
+            serverToday={today}
+          />
         }
         installmentsCard={
-          <InstallmentsHomeCard ownerId={user.id} currency={profile.default_currency} server={installments} serverToday={today} />
+          <InstallmentsHomeCard
+            key="installments"
+            ownerId={user.id}
+            currency={profile.default_currency}
+            server={installments}
+            serverToday={today}
+          />
         }
       />
     </AppShell>
