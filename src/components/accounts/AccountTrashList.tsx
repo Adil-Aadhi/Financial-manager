@@ -61,7 +61,7 @@ export function AccountTrashList({
 
       setRestoringId(null);
       if (result.queued) return; // Restored on this device; it syncs later.
-      markOfflineDataStale();
+      markOfflineDataStale(["accounts", "dashboard"]);
       router.refresh();
     });
   };

@@ -41,7 +41,7 @@ const DEFAULT_PROVIDER: Record<InstallmentPlanType, string> = { product_emi: "Ba
 
 export function completeInstallmentMutation(result: { queued: boolean }, router: ReturnType<typeof useRouter>) {
   if (!result.queued) {
-    markOfflineDataStale();
+    markOfflineDataStale(["installments", "transactions", "accounts", "dashboard"]);
     router.refresh();
   }
 }

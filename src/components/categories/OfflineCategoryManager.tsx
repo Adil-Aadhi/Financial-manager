@@ -2,6 +2,7 @@
 
 import { useLiveQuery } from "dexie-react-hooks";
 import { Alert } from "@/components/ui/Alert";
+import { SectionRefreshIndicator } from "@/components/ui/SectionRefreshIndicator";
 import { CategoryManager } from "@/components/categories/CategoryManager";
 import type { CategoryRecord } from "@/lib/categories";
 import { isCategoryType } from "@/lib/categories";
@@ -53,7 +54,8 @@ export function OfflineCategoryManager({
   useLocalContentMark(localCategories != null); // TEMPORARY perf (Step 3 Phase 0)
 
   return (
-    <div className="space-y-4">
+    <div className="relative space-y-4">
+      <SectionRefreshIndicator scope="categories" className="absolute right-0 -top-5" />
       {!isOnline && (
         <Alert variant="info" title="You are offline">
           Category changes are saved on this device and sync later.

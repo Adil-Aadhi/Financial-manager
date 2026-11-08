@@ -10,6 +10,7 @@ import {
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
+import { SectionRefreshIndicator } from "@/components/ui/SectionRefreshIndicator";
 import { cn } from "@/lib/cn";
 import {
   formatInstallmentDate,
@@ -57,6 +58,7 @@ export function InstallmentDetailsModal({
   });
   const [tab, setTab] = useState<"schedule" | "history">("schedule");
   const [error, setError] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<InstallmentLifecycle | "delete" | null>(null);
   const [pending, startTransition] = useTransition();
 
   const summary = summarizePlan(plan, data.payments, today);
@@ -91,15 +93,17 @@ export function InstallmentDetailsModal({
     );
   }
 
-  const mutate = (local: (owner: string) => Promise<void>, remote: () => Promise<{ success: boolean; error?: string }>, after?: () => void) =>
+  const mutate = (action: InstallmentLifecycle | "delete", local: (owner: string) => Promise<void>, remote: () => Promise<{ success: boolean; error?: string }>, after?: () => void) => {
+    setPendingAction(action);
     startTransition(async () => {
       const result = await runMutation({ local, remote });
       if (!result.success) return setError(result.error ?? "Unable to update this plan.");
       completeInstallmentMutation(result, router);
       after?.();
     });
+  };
   const lifecycle = (value: InstallmentLifecycle) =>
-    mutate((owner) => setInstallmentPlanLifecycleLocally(owner, plan.id, value), () => setInstallmentPlanLifecycleAction(plan.id, value));
+    mutate(value, (owner) => setInstallmentPlanLifecycleLocally(owner, plan.id, value), () => setInstallmentPlanLifecycleAction(plan.id, value));
 
   if (mode === "delete") {
     return (
@@ -110,8 +114,8 @@ export function InstallmentDetailsModal({
             The schedule and its payment history are removed. Expenses already recorded in Transactions stay there, so account balances don&apos;t change. To keep the history, cancel the plan instead.
           </p>
           <div className="grid grid-cols-2 gap-2">
-            <Button variant="secondary" size="lg" onClick={() => setMode("details")}>Keep</Button>
-            <Button variant="danger" size="lg" isLoading={pending} onClick={() => mutate((owner) => deleteInstallmentPlanLocally(owner, plan.id), () => deleteInstallmentPlanAction(plan.id), onClose)}>
+            <Button variant="secondary" size="lg" onClick={() => setMode("details")} disabled={pending}>Keep</Button>
+            <Button variant="danger" size="lg" isLoading={pending && pendingAction === "delete"} disabled={pending} onClick={() => mutate("delete", (owner) => deleteInstallmentPlanLocally(owner, plan.id), () => deleteInstallmentPlanAction(plan.id), onClose)}>
               Delete
             </Button>
           </div>
@@ -132,7 +136,8 @@ export function InstallmentDetailsModal({
 
   return (
     <Modal isOpen onClose={onClose} title={plan.name} description={`${planTypeLabel(plan.plan_type)} · ${plan.provider}`} size="lg">
-      <div className="space-y-5">
+      <div className="relative space-y-5">
+        <SectionRefreshIndicator scope="installments" className="absolute right-0 -top-4 rounded-full bg-glass-strong px-2 py-1" />
         {error && <Alert variant="error" onClose={() => setError(null)}>{error}</Alert>}
 
         <div className="flex items-center gap-3 rounded-2xl border border-line bg-glass-hover p-4">
@@ -174,24 +179,25 @@ export function InstallmentDetailsModal({
 
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {plan.lifecycle === "cancelled" ? (
-            <Button onClick={() => lifecycle("active")} leftIcon={<Play className="h-4 w-4" />} isLoading={pending}>Reactivate</Button>
+            <Button onClick={() => lifecycle("active")} leftIcon={<Play className="h-4 w-4" />} isLoading={pending && pendingAction === "active"} disabled={pending}>Reactivate</Button>
           ) : summary.nextRow ? (
-            <Button onClick={() => openRow(summary.nextRow!)} leftIcon={<Check className="h-4 w-4" />}>Mark {summary.nextRow.number}/{plan.installment_count} paid</Button>
+            <Button onClick={() => openRow(summary.nextRow!)} leftIcon={<Check className="h-4 w-4" />} disabled={pending}>Mark {summary.nextRow.number}/{plan.installment_count} paid</Button>
           ) : null}
-          <Button variant="secondary" onClick={() => setMode("edit")} leftIcon={<Pencil className="h-4 w-4" />}>Edit</Button>
-          {plan.lifecycle === "active" && <Button variant="outline" onClick={() => lifecycle("paused")} leftIcon={<Pause className="h-4 w-4" />} disabled={pending}>Pause</Button>}
-          {plan.lifecycle === "paused" && <Button variant="outline" onClick={() => lifecycle("active")} leftIcon={<Play className="h-4 w-4" />} disabled={pending}>Resume</Button>}
+          <Button variant="secondary" onClick={() => setMode("edit")} leftIcon={<Pencil className="h-4 w-4" />} disabled={pending}>Edit</Button>
+          {plan.lifecycle === "active" && <Button variant="outline" onClick={() => lifecycle("paused")} leftIcon={<Pause className="h-4 w-4" />} isLoading={pending && pendingAction === "paused"} disabled={pending}>Pause</Button>}
+          {plan.lifecycle === "paused" && <Button variant="outline" onClick={() => lifecycle("active")} leftIcon={<Play className="h-4 w-4" />} isLoading={pending && pendingAction === "active"} disabled={pending}>Resume</Button>}
           {canPay && canCloseEarly && (
             <Button
               variant="outline"
               onClick={() => setTarget({ kind: "closure", installmentNumber: unpaid[0].number, coversThrough: plan.installment_count, payment: null })}
               leftIcon={<FastForward className="h-4 w-4" />}
+              disabled={pending}
             >
               Close early
             </Button>
           )}
           {plan.lifecycle !== "cancelled" && plan.lifecycle !== "completed" && (
-            <Button variant="ghost" onClick={() => lifecycle("cancelled")} leftIcon={<XCircle className="h-4 w-4" />} disabled={pending}>Cancel plan</Button>
+            <Button variant="ghost" onClick={() => lifecycle("cancelled")} leftIcon={<XCircle className="h-4 w-4" />} isLoading={pending && pendingAction === "cancelled"} disabled={pending}>Cancel plan</Button>
           )}
         </div>
 
@@ -262,7 +268,7 @@ export function InstallmentDetailsModal({
           <p className="rounded-2xl border border-line bg-glass-hover p-4 text-center text-xs text-fg-subtle">No confirmed payments yet.</p>
         )}
 
-        <button type="button" onClick={() => setMode("delete")} className="mx-auto flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-danger hover:bg-danger/10">
+        <button type="button" onClick={() => setMode("delete")} disabled={pending} className="mx-auto flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-danger hover:bg-danger/10 disabled:opacity-55">
           <Trash2 className="h-3.5 w-3.5" />
           Delete plan
         </button>

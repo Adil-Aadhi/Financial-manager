@@ -6,6 +6,7 @@ import { Landmark } from "lucide-react";
 import { AccountList, type AccountListItem } from "@/components/accounts/AccountList";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { SectionRefreshIndicator } from "@/components/ui/SectionRefreshIndicator";
 import {
   ACCOUNT_GROUP_LABELS,
   ACCOUNT_GROUPS,
@@ -133,8 +134,9 @@ export function OfflineAccountList({
         title="Accounts"
         description="Balances are calculated from transaction history."
         bodyClassName="pt-2"
-        action={
-          hasCustomOrder ? (
+        action={<>
+          <SectionRefreshIndicator scope={["accounts", "transactions", "installments"]} className="absolute right-4 top-12 sm:right-5 sm:top-14" />
+          {hasCustomOrder ? (
             <button
               type="button"
               onClick={handleResetOrder}
@@ -143,8 +145,8 @@ export function OfflineAccountList({
             >
               Reset to default
             </button>
-          ) : null
-        }
+          ) : null}
+        </>}
       >
         <div id="account-group-panel" role="tabpanel" aria-labelledby={`account-group-tab-${activeGroup}`}>
           {visibleAccounts.length === 0 ? (

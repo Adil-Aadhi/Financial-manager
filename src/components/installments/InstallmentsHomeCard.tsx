@@ -4,6 +4,7 @@ import Link from "next/link";
 import { CalendarClock } from "lucide-react";
 import { Card, CardLink } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { SectionRefreshIndicator } from "@/components/ui/SectionRefreshIndicator";
 import { cn } from "@/lib/cn";
 import { formatInstallmentDate, upcomingInstallments } from "@/lib/installments";
 import type { InstallmentsServerData } from "@/lib/supabase/installments";
@@ -35,7 +36,7 @@ export function InstallmentsHomeCard({
     : undefined;
 
   return (
-    <Card title="Upcoming Installments" description={description} action={<CardLink href="/installments">View all</CardLink>}>
+    <Card title="Upcoming Installments" description={description} action={<><SectionRefreshIndicator scope="installments" className="absolute right-20 top-4 sm:top-5" /><CardLink href="/installments">View all</CardLink></>}>
       {!data.available ? (
         <EmptyState icon={<CalendarClock className="h-5 w-5" />} title="Installments need setup" description="Apply the Installments database migration to enable this feature." />
       ) : upcoming.length ? (

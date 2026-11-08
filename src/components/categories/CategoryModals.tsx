@@ -94,7 +94,7 @@ export function CategoryFormModal({
         return;
       }
 
-      if (!result.queued) markOfflineDataStale();
+      if (!result.queued) markOfflineDataStale(["categories"]);
       if (!isEditing) {
         setName("");
         setType("income");
@@ -232,7 +232,7 @@ export function DeleteCategoryModal({
         setError(result.error ?? "Unable to delete this category.");
         return;
       }
-      if (!result.queued) markOfflineDataStale();
+      if (!result.queued) markOfflineDataStale(["categories"]);
       onClose();
     });
   };

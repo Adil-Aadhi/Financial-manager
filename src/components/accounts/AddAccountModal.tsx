@@ -81,7 +81,7 @@ export function AddAccountModal({
       if (!res.success) {
         setError(res.error || "Failed to create account. Please try again.");
       } else {
-        if (!res.queued) markOfflineDataStale();
+        if (!res.queued) markOfflineDataStale(["accounts", "dashboard"]);
         setSuccessMessage(
           res.queued
             ? `Account "${trimmed}" saved on this device. It will sync later.`

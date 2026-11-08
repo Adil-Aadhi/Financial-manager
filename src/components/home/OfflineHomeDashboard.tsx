@@ -17,6 +17,7 @@ import { MonthlyBudgetCard } from "@/components/budget/MonthlyBudgetCard";
 import { CategoryTile, categoryStyle } from "@/components/categories/CategoryIcon";
 import { Card, CardLink } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { SectionRefreshIndicator } from "@/components/ui/SectionRefreshIndicator";
 import { cn } from "@/lib/cn";
 import { formatMoney } from "@/lib/format";
 import { offlineDb } from "@/lib/offline/db";
@@ -198,7 +199,7 @@ function HomeDashboard({
 
   return (
     <div className="space-y-4 sm:space-y-5">
-      <section className="glass-strong glass-edge animate-rise overflow-hidden rounded-3xl p-4 sm:p-7">
+      <section className="glass-strong glass-edge relative animate-rise overflow-hidden rounded-3xl p-4 sm:p-7">
         <div className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full bg-[radial-gradient(circle,var(--aurora-1),transparent_70%)]" />
         <div className="relative flex items-center justify-between">
           <span className="flex items-center gap-2 text-xs font-medium text-fg-muted">
@@ -216,6 +217,7 @@ function HomeDashboard({
             ? "No included accounts in this currency"
             : `Across ${data.currencyAccountCount} included ${currency} account${data.currencyAccountCount === 1 ? "" : "s"}`}
         </p>
+        <SectionRefreshIndicator scope={["dashboard", "accounts", "transactions", "installments"]} className="absolute right-4 top-14 sm:right-7 sm:top-16" />
         <div className="relative mt-5 grid grid-cols-3 gap-2 sm:mt-6 sm:gap-3">
           <MonthStat label="Income" value={formatMoney(data.monthIncome, currency, { compact: true })} icon={<ArrowDownLeft className="h-3.5 w-3.5" />} tone="positive" />
           <MonthStat label="Expenses" value={formatMoney(data.monthExpense, currency, { compact: true })} icon={<ArrowUpRight className="h-3.5 w-3.5" />} tone="negative" />
@@ -243,7 +245,7 @@ function HomeDashboard({
 
       <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-3">
         <div className="space-y-4 sm:space-y-5 lg:col-span-2">
-          <Card title="Recent transactions" action={<CardLink href="/transactions">View all</CardLink>} bodyClassName="pt-2">
+          <Card title="Recent transactions" action={<><SectionRefreshIndicator scope={["transactions", "installments"]} className="absolute right-20 top-4 sm:top-5" /><CardLink href="/transactions">View all</CardLink></>} bodyClassName="pt-2">
             {data.recent.length ? (
               <div className="divide-y divide-line">
                 {data.recent.map((transaction) => {
@@ -271,7 +273,7 @@ function HomeDashboard({
         </div>
 
         <div className="space-y-4 sm:space-y-5">
-          <Card title="Accounts" bodyClassName="pt-2">
+          <Card title="Accounts" action={<SectionRefreshIndicator scope={["accounts", "transactions", "installments"]} />} bodyClassName="pt-2">
             {data.activeAccounts.length ? (
               <div className="space-y-2 p-1">
                 {data.activeAccounts.map((account) => {

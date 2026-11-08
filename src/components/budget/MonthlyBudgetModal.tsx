@@ -83,7 +83,7 @@ export function MonthlyBudgetModal({
       }
       onClose();
       if (result.queued) return; // Saved on this device; Home reads it from IndexedDB.
-      markOfflineDataStale();
+      markOfflineDataStale(["monthly-budget", "dashboard"]);
       router.refresh();
     });
   };
@@ -103,7 +103,7 @@ export function MonthlyBudgetModal({
       }
       onClose();
       if (result.queued) return;
-      markOfflineDataStale();
+      markOfflineDataStale(["monthly-budget", "dashboard"]);
       router.refresh();
     });
   };

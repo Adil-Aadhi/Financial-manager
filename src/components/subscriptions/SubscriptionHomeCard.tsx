@@ -5,6 +5,7 @@ import { Repeat2 } from "lucide-react";
 import { SubscriptionCard } from "./SubscriptionCard";
 import { Card, CardLink } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { SectionRefreshIndicator } from "@/components/ui/SectionRefreshIndicator";
 import { formatMoney } from "@/lib/format";
 import type { SupportedCurrency } from "@/lib/supabase/profile";
 import type { SubscriptionsServerData } from "@/lib/supabase/subscriptions";
@@ -34,7 +35,7 @@ export function SubscriptionHomeCard({
     <Card
       title="Subscriptions"
       description={active.length ? `${active.length} active · ${formatMoney(monthly, currency, { compact: true })}/month expected` : undefined}
-      action={<CardLink href="/subscriptions">View all</CardLink>}
+      action={<><SectionRefreshIndicator scope="subscriptions" className="absolute right-20 top-4 sm:top-5" /><CardLink href="/subscriptions">View all</CardLink></>}
     >
       {!data.available ? (
         <EmptyState icon={<Repeat2 className="h-5 w-5" />} title="Subscriptions need setup" description="Apply the subscriptions database migration to enable this feature." />

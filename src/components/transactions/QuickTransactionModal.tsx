@@ -262,7 +262,7 @@ export function QuickTransactionModal({
       onSaved?.(result.queued ? `${saved} on this device. It will sync later.` : `${saved}.`);
       onClose();
       if (result.queued) return; // IndexedDB already shows it; there is no server change to fetch.
-      markOfflineDataStale();
+      markOfflineDataStale(["transactions", "accounts", "dashboard", "installments"]);
       router.refresh();
     });
   };

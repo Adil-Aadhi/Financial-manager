@@ -6,6 +6,11 @@ import { normalizeIncludeInSummary } from "@/lib/accountSummary";
 import type { BillPaymentRecord, BillRecord } from "@/lib/bills";
 import type { InstallmentPaymentRecord, InstallmentPlanRecord } from "@/lib/installments";
 import { offlineDb, type LocalSyncMeta, type LocalVerificationTotals } from "@/lib/offline/db";
+import {
+  beginRefreshFeedback,
+  finishRefreshFeedback,
+  type RefreshScope,
+} from "@/lib/offline/refreshFeedback";
 import { overlayOutbox } from "@/lib/offline/snapshotOverlay";
 import { createClient } from "@/lib/supabase/client";
 import type { SubscriptionIconName } from "@/lib/subscriptions";
@@ -616,8 +621,9 @@ async function runBootstrap(expectedUserId: string) {
  * Call after a server mutation succeeds. The next refresh for any owner downloads a new
  * snapshot instead of trusting the freshness window, and mounted pages start one right away.
  */
-export function markOfflineDataStale() {
+export function markOfflineDataStale(scopes: readonly RefreshScope[] = []) {
   mutationGeneration += 1;
+  beginRefreshFeedback(mutationGeneration, scopes);
   window.dispatchEvent(new Event(OFFLINE_DATA_STALE_EVENT));
 }
 
@@ -657,7 +663,12 @@ export async function ensureOfflineBootstrap(
           expectedUserId,
           Math.max(syncedGeneration.get(expectedUserId) ?? 0, generation)
         );
+        finishRefreshFeedback(generation);
         return meta;
+      })
+      .catch((error: unknown) => {
+        finishRefreshFeedback(generation);
+        throw error;
       })
       .finally(() => {
         if (inFlight.get(expectedUserId) === entry) inFlight.delete(expectedUserId);

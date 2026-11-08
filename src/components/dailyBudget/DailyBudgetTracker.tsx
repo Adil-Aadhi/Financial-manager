@@ -18,6 +18,7 @@ import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { SectionRefreshIndicator } from "@/components/ui/SectionRefreshIndicator";
 import { cn } from "@/lib/cn";
 import {
   addMonths,
@@ -105,7 +106,8 @@ export function DailyBudgetTracker({
   const defaultEntryDate = viewMonth === currentMonth ? today : monthLastDay(viewMonth);
 
   return (
-    <div className="space-y-4 sm:space-y-5">
+    <div className="relative space-y-4 sm:space-y-5">
+      <SectionRefreshIndicator scope="daily-budget" className="absolute right-0 -top-5" />
       {!isOnline && (
         <Alert variant="info">You are offline. Changes are saved on this device and sync when you reconnect.</Alert>
       )}

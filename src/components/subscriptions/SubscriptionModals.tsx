@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { Select } from "@/components/ui/Select";
+import { SectionRefreshIndicator } from "@/components/ui/SectionRefreshIndicator";
 import { markOfflineDataStale } from "@/lib/offline/bootstrap";
 import {
   createSubscriptionLocally,
@@ -51,7 +52,7 @@ const CURRENCIES: SupportedCurrency[] = ["INR", "USD", "AED"];
 
 function completeMutation(result: { queued: boolean }, router: ReturnType<typeof useRouter>) {
   if (!result.queued) {
-    markOfflineDataStale();
+    markOfflineDataStale(["subscriptions"]);
     router.refresh();
   }
 }
@@ -200,6 +201,7 @@ export function SubscriptionDetailsModal({
   const router = useRouter();
   const [mode, setMode] = useState<"details" | "edit" | "delete">("details");
   const [error, setError] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<SubscriptionLifecycle | "pay" | "undo" | "delete" | null>(null);
   const [isPending, startTransition] = useTransition();
   const history = payments.filter((payment) => payment.subscription_id === subscription.id)
     .sort((a, b) => b.due_date.localeCompare(a.due_date));
@@ -211,8 +213,9 @@ export function SubscriptionDetailsModal({
     return <SubscriptionFormModal key={`${subscription.id}:${subscription.updated_at}`} isOpen onClose={() => setMode("details")} currency={currency} today={today} subscription={subscription} />;
   }
 
-  const mutate = (local: (ownerId: string) => Promise<void>, remote: () => Promise<{ success: boolean; error?: string }>, done?: () => void) => {
+  const mutate = (action: SubscriptionLifecycle | "pay" | "undo" | "delete", local: (ownerId: string) => Promise<void>, remote: () => Promise<{ success: boolean; error?: string }>, done?: () => void) => {
     setError(null);
+    setPendingAction(action);
     startTransition(async () => {
       const result = await runMutation({ local, remote });
       if (!result.success) {
@@ -225,6 +228,7 @@ export function SubscriptionDetailsModal({
   };
 
   const setLifecycle = (lifecycle: SubscriptionLifecycle) => mutate(
+    lifecycle,
     (ownerId) => setSubscriptionLifecycleLocally(ownerId, subscription.id, lifecycle),
     () => setSubscriptionLifecycleAction(subscription.id, lifecycle)
   );
@@ -233,6 +237,7 @@ export function SubscriptionDetailsModal({
     const paymentId = crypto.randomUUID();
     const paidAt = new Date().toISOString();
     mutate(
+      "pay",
       (ownerId) => markSubscriptionPaidLocally(ownerId, { paymentId, subscriptionId: subscription.id, dueDate: subscription.next_payment_date, paidAt }),
       () => markSubscriptionPaidAction({ paymentId, subscriptionId: subscription.id, dueDate: subscription.next_payment_date, paidAt })
     );
@@ -241,6 +246,7 @@ export function SubscriptionDetailsModal({
   const undo = () => {
     if (!latest) return;
     mutate(
+      "undo",
       (ownerId) => undoSubscriptionPaymentLocally(ownerId, { paymentId: latest.id, subscriptionId: subscription.id, dueDate: latest.due_date }),
       () => undoSubscriptionPaymentAction({ paymentId: latest.id, subscriptionId: subscription.id, dueDate: latest.due_date })
     );
@@ -252,8 +258,9 @@ export function SubscriptionDetailsModal({
         <div className="space-y-4">
           {error && <Alert variant="error">{error}</Alert>}
           <div className="grid grid-cols-2 gap-2">
-            <Button variant="secondary" size="lg" onClick={() => setMode("details")}>Cancel</Button>
-            <Button variant="danger" size="lg" isLoading={isPending} onClick={() => mutate(
+            <Button variant="secondary" size="lg" onClick={() => setMode("details")} disabled={isPending}>Cancel</Button>
+            <Button variant="danger" size="lg" isLoading={isPending && pendingAction === "delete"} disabled={isPending} onClick={() => mutate(
+              "delete",
               (ownerId) => deleteSubscriptionLocally(ownerId, subscription.id),
               () => deleteSubscriptionAction(subscription.id),
               onClose
@@ -267,7 +274,8 @@ export function SubscriptionDetailsModal({
   const status = subscriptionStatus(subscription, today);
   return (
     <Modal isOpen onClose={onClose} title={subscription.name} description={`${cycleLabel(subscription.billing_cycle)} · next ${formatSubscriptionDate(subscription.next_payment_date)}`} size="md">
-      <div className="space-y-5">
+      <div className="relative space-y-5">
+        <SectionRefreshIndicator scope="subscriptions" className="absolute right-0 -top-4 rounded-full bg-glass-strong px-2 py-1" />
         {error && <Alert variant="error" onClose={() => setError(null)}>{error}</Alert>}
         <div className="flex items-center justify-between rounded-2xl border border-line bg-glass-hover p-4">
           <div><p className="text-xs text-fg-subtle">Current payment</p><p className="mt-1 font-money text-lg font-bold text-fg">{subscription.currency} {Number(subscription.amount).toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</p></div>
@@ -278,19 +286,19 @@ export function SubscriptionDetailsModal({
 
         <div className="grid grid-cols-2 gap-2">
           {subscription.lifecycle === "active" ? (
-            <Button onClick={markPaid} disabled={isPending} leftIcon={<Check className="h-4 w-4" />}>Mark as paid</Button>
+            <Button onClick={markPaid} disabled={isPending} isLoading={isPending && pendingAction === "pay"} leftIcon={<Check className="h-4 w-4" />}>Mark as paid</Button>
           ) : subscription.lifecycle === "paused" ? (
-            <Button onClick={() => setLifecycle("active")} disabled={isPending} leftIcon={<Play className="h-4 w-4" />}>Resume</Button>
+            <Button onClick={() => setLifecycle("active")} disabled={isPending} isLoading={isPending && pendingAction === "active"} leftIcon={<Play className="h-4 w-4" />}>Resume</Button>
           ) : (
-            <Button onClick={() => setLifecycle("active")} disabled={isPending} leftIcon={<Play className="h-4 w-4" />}>Reactivate</Button>
+            <Button onClick={() => setLifecycle("active")} disabled={isPending} isLoading={isPending && pendingAction === "active"} leftIcon={<Play className="h-4 w-4" />}>Reactivate</Button>
           )}
           <Button variant="secondary" onClick={() => setMode("edit")} disabled={isPending}>Edit</Button>
-          {subscription.lifecycle === "active" && <Button variant="outline" onClick={() => setLifecycle("paused")} disabled={isPending} leftIcon={<Pause className="h-4 w-4" />}>Pause</Button>}
-          {subscription.lifecycle !== "cancelled" && <Button variant="outline" onClick={() => setLifecycle("cancelled")} disabled={isPending}>Cancel plan</Button>}
+          {subscription.lifecycle === "active" && <Button variant="outline" onClick={() => setLifecycle("paused")} disabled={isPending} isLoading={isPending && pendingAction === "paused"} leftIcon={<Pause className="h-4 w-4" />}>Pause</Button>}
+          {subscription.lifecycle !== "cancelled" && <Button variant="outline" onClick={() => setLifecycle("cancelled")} disabled={isPending} isLoading={isPending && pendingAction === "cancelled"}>Cancel plan</Button>}
         </div>
 
         <section>
-          <div className="mb-2 flex items-center justify-between"><h3 className="text-sm font-semibold text-fg">Payment history</h3>{latest && <button type="button" onClick={undo} disabled={isPending} className="flex items-center gap-1 text-xs font-semibold text-accent disabled:opacity-50"><RotateCcw className="h-3 w-3" />Undo latest</button>}</div>
+          <div className="mb-2 flex items-center justify-between"><h3 className="text-sm font-semibold text-fg">Payment history</h3>{latest && <button type="button" onClick={undo} disabled={isPending} aria-busy={isPending && pendingAction === "undo" || undefined} className="flex items-center gap-1 text-xs font-semibold text-accent disabled:opacity-50"><RotateCcw className={`h-3 w-3 ${isPending && pendingAction === "undo" ? "animate-spin" : ""}`} />Undo latest</button>}</div>
           <div className="divide-y divide-line rounded-2xl border border-line bg-glass-hover px-3">
             <div className="flex items-center justify-between py-3 text-xs"><span className="text-fg-muted">Current cycle · {formatSubscriptionDate(subscription.next_payment_date)}</span><SubscriptionStatusBadge status={status} /></div>
             {subscription.lifecycle === "active" && [nextFuture, secondFuture].map((date) => <div key={date} className="flex items-center justify-between py-3 text-xs"><span className="text-fg-muted">Future cycle · {formatSubscriptionDate(date)}</span><SubscriptionStatusBadge status="upcoming" /></div>)}
@@ -299,7 +307,7 @@ export function SubscriptionDetailsModal({
           </div>
         </section>
 
-        <button type="button" onClick={() => setMode("delete")} className="mx-auto flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-danger hover:bg-danger/10"><Trash2 className="h-3.5 w-3.5" />Delete subscription</button>
+        <button type="button" onClick={() => setMode("delete")} disabled={isPending} className="mx-auto flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-danger hover:bg-danger/10 disabled:opacity-55"><Trash2 className="h-3.5 w-3.5" />Delete subscription</button>
       </div>
     </Modal>
   );

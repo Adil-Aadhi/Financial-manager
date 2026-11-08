@@ -62,7 +62,7 @@ export function useDailyBudgetMutation() {
       const outcome = await runMutation(mutation);
       onDone(outcome);
       if (!outcome.success || outcome.queued) return; // queued: the page reads IndexedDB
-      markOfflineDataStale();
+      markOfflineDataStale(["daily-budget", "dashboard"]);
       router.refresh();
     });
   };
