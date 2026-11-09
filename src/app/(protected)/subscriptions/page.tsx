@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { AppShell, PageHeader } from "@/components/layout/AppShell";
+import { PageHeader } from "@/components/layout/AppShell";
 import { SubscriptionTracker } from "@/components/subscriptions/SubscriptionTracker";
 import { getAuthenticatedUserProfile } from "@/lib/supabase/profile";
 import { createClient } from "@/lib/supabase/server";
@@ -24,10 +24,8 @@ export default async function SubscriptionsPage({
   const supabase = await createClient();
   const server = await getSubscriptionsServerData(supabase, user.id);
   const params = await searchParams;
-  const name = profile.full_name || user.email?.split("@")[0] || "there";
-
   return (
-    <AppShell userName={name} userEmail={user.email} currency={profile.default_currency}>
+    <>
       <PageHeader eyebrow="Planning" title="Subscriptions" description="Recurring-payment reminders and history. No account balances are changed." />
       <SubscriptionTracker
         ownerId={user.id}
@@ -37,6 +35,6 @@ export default async function SubscriptionsPage({
         initialSelectedId={params.selected}
         initiallyAdding={params.add === "1"}
       />
-    </AppShell>
+    </>
   );
 }

@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { AddAccountButton } from "@/components/accounts/AddAccountButton";
 import type { AccountListItem } from "@/components/accounts/AccountList";
 import { OfflineAccountList } from "@/components/accounts/OfflineAccountList";
-import { AppShell, PageHeader } from "@/components/layout/AppShell";
+import { PageHeader } from "@/components/layout/AppShell";
 import { Alert } from "@/components/ui/Alert";
 import { getAuthenticatedUserProfile } from "@/lib/supabase/profile";
 import { createClient } from "@/lib/supabase/server";
@@ -99,10 +99,8 @@ export default async function TransactionsPage() {
     };
   });
 
-  const name = profile.full_name || user.email?.split("@")[0] || "User";
-
   return (
-    <AppShell userName={name} userEmail={user.email} currency={profile.default_currency}>
+    <>
       <PageHeader
         eyebrow="Activity"
         title="Transactions"
@@ -125,6 +123,6 @@ export default async function TransactionsPage() {
           actionsEnabled={accountTrashReady}
         />
       </div>
-    </AppShell>
+    </>
   );
 }

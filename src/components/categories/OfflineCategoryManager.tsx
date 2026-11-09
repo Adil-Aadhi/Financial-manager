@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Alert } from "@/components/ui/Alert";
 import { SectionRefreshIndicator } from "@/components/ui/SectionRefreshIndicator";
@@ -13,17 +14,13 @@ import { useOnlineStatus } from "@/lib/offline/useOnlineStatus";
 
 export function OfflineCategoryManager({
   ownerId,
-  serverCategories,
+  onReadyChange,
 }: {
   ownerId: string;
-  serverCategories: CategoryRecord[];
+  onReadyChange?: (ready: boolean) => void;
 }) {
   const isOnline = useOnlineStatus();
-  const serverVersion = serverCategories
-    .map((category) => `${category.id}:${category.name}:${category.type}:${category.icon}`)
-    .join("|");
-
-  useOfflineRefresh(ownerId, serverVersion, "offline categories");
+  useOfflineRefresh(ownerId, "local-first", "offline categories");
 
   const localCategories = useLiveQuery(async () => {
     const meta = await offlineDb.syncMeta.get(ownerId);
@@ -51,7 +48,41 @@ export function OfflineCategoryManager({
           left.name.localeCompare(right.name)
       );
   }, [ownerId]);
-  useLocalContentMark(localCategories != null); // TEMPORARY perf (Step 3 Phase 0)
+  const ready = localCategories != null;
+  useLocalContentMark(ready); // TEMPORARY perf (Step 3 Phase 0)
+
+  useEffect(() => {
+    onReadyChange?.(ready);
+  }, [onReadyChange, ready]);
+
+  if (!ready) {
+    return (
+      <div className="relative space-y-4">
+        <SectionRefreshIndicator scope="categories" className="absolute right-0 -top-5" />
+        <Alert
+          variant="info"
+          title={isOnline ? "Preparing categories" : "Categories are not saved on this device yet"}
+        >
+          {isOnline
+            ? "Your saved categories will appear after the first device snapshot finishes."
+            : "Connect to the internet once to download your categories for offline use."}
+        </Alert>
+        <div className="glass glass-edge animate-pulse rounded-2xl p-4 sm:p-5" aria-hidden="true">
+          <div className="grid grid-cols-2 gap-2 border-b border-line pb-4">
+            <div className="h-11 rounded-xl bg-glass-hover" />
+            <div className="h-11 rounded-xl bg-glass-hover" />
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {Array.from({ length: 6 }, (_, index) => (
+              <div key={index} className="h-[76px] rounded-2xl bg-glass-hover" />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const defaultsReady = localCategories.filter((category) => category.is_default).length >= 17;
 
   return (
     <div className="relative space-y-4">
@@ -61,8 +92,13 @@ export function OfflineCategoryManager({
           Category changes are saved on this device and sync later.
         </Alert>
       )}
+      {!defaultsReady && (
+        <Alert variant="warning" title="Database update required">
+          Run the categories migration in Supabase to enable the protected default categories.
+        </Alert>
+      )}
       <CategoryManager
-        categories={localCategories ?? serverCategories}
+        categories={localCategories}
         mutationsEnabled
       />
     </div>

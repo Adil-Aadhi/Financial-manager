@@ -1,36 +1,26 @@
-import { Metadata } from "next";
-import { redirect } from "next/navigation";
-import { getAuthenticatedUserProfile } from "@/lib/supabase/profile";
-import { AppShell, PageHeader } from "@/components/layout/AppShell";
-import { Card } from "@/components/ui/Card";
-import { OfflineProfileSettingsForm } from "@/components/profile/OfflineProfileSettingsForm";
-import { ThemeToggle } from "@/components/theme/ThemeToggle";
-import { AccentPicker } from "@/components/theme/AccentPicker";
+"use client";
+
+import { useAuthenticatedApp } from "@/components/auth/AuthenticatedAppProvider";
 import { SignOutButton } from "@/components/auth/SignOutButton";
+import { PageHeader } from "@/components/layout/AppShell";
+import { OfflineProfileSettingsForm } from "@/components/profile/OfflineProfileSettingsForm";
+import { AccentPicker } from "@/components/theme/AccentPicker";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
+import { Card } from "@/components/ui/Card";
 
-export const instant = false;
-
-export const metadata: Metadata = {
-  title: "Settings | AccountTracker",
-  description: "Profile and preferences.",
-};
-
-export default async function SettingsPage() {
-  const { user, profile } = await getAuthenticatedUserProfile();
-  if (!user || !profile) redirect("/login");
-
-  const name = profile.full_name || user.email?.split("@")[0] || "User";
+export function SettingsPageContent() {
+  const { id: ownerId, email, profile } = useAuthenticatedApp();
 
   return (
-    <AppShell userName={name} userEmail={user.email} currency={profile.default_currency}>
+    <>
       <PageHeader title="Settings" />
 
       <div className="max-w-2xl space-y-5">
         <Card title="Profile">
           <OfflineProfileSettingsForm
-            ownerId={user.id}
+            ownerId={ownerId}
             serverProfile={profile}
-            userEmail={user.email || ""}
+            userEmail={email}
           />
         </Card>
 
@@ -51,6 +41,6 @@ export default async function SettingsPage() {
           <SignOutButton />
         </section>
       </div>
-    </AppShell>
+    </>
   );
 }

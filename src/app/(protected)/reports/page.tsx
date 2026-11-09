@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getReportSource } from "@/lib/supabase/reports";
 import { TRANSACTION_CALENDAR_TIME_ZONE } from "@/lib/month";
 import { buildReport, getReportRange } from "@/lib/reports";
-import { AppShell, PageHeader } from "@/components/layout/AppShell";
+import { PageHeader } from "@/components/layout/AppShell";
 import { OfflineReportContent } from "@/components/reports/OfflineReportContent";
 import { ReportsSkeleton } from "@/components/reports/ReportsSkeleton";
 
@@ -26,10 +26,8 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
   const { user, profile } = await getAuthenticatedUserProfile();
   if (!user || !profile) redirect("/login");
 
-  const name = profile.full_name || user.email?.split("@")[0] || "User";
-
   return (
-    <AppShell userName={name} userEmail={user.email} currency={profile.default_currency}>
+    <>
       <PageHeader title="Reports" description="Income, spending and savings for any period." />
       <Suspense fallback={<ReportsSkeleton />}>
         <ReportContent
@@ -38,7 +36,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
           searchParams={searchParams}
         />
       </Suspense>
-    </AppShell>
+    </>
   );
 }
 

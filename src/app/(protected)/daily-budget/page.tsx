@@ -3,7 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { DailyBudgetTracker } from "@/components/dailyBudget/DailyBudgetTracker";
-import { AppShell, PageHeader } from "@/components/layout/AppShell";
+import { PageHeader } from "@/components/layout/AppShell";
 import { dailyBudgetToday } from "@/lib/dailyBudget";
 import { getDailyBudgetServerData } from "@/lib/supabase/dailyBudget";
 import { getAuthenticatedUserProfile } from "@/lib/supabase/profile";
@@ -20,13 +20,12 @@ export default async function DailyBudgetPage() {
   const { user, profile } = await getAuthenticatedUserProfile();
   if (!user || !profile) redirect("/login");
 
-  const name = profile.full_name || user.email?.split("@")[0] || "there";
   const supabase = await createClient();
   // Every month (history is browsable); the device copy replaces this once it is ready.
   const dailyBudget = await getDailyBudgetServerData(supabase, user.id);
 
   return (
-    <AppShell userName={name} userEmail={user.email} currency={profile.default_currency}>
+    <>
       <Link
         href="/home"
         className="mb-2 inline-flex items-center gap-1 rounded-lg px-1.5 py-1 text-xs font-semibold text-fg-muted transition-colors hover:bg-glass-hover hover:text-fg"
@@ -44,6 +43,6 @@ export default async function DailyBudgetPage() {
         server={dailyBudget}
         serverToday={dailyBudgetToday()}
       />
-    </AppShell>
+    </>
   );
 }

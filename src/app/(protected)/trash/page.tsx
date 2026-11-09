@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { Clock3 } from "lucide-react";
 import { getAuthenticatedUserProfile } from "@/lib/supabase/profile";
 import { createClient } from "@/lib/supabase/server";
-import { AppShell, PageHeader } from "@/components/layout/AppShell";
+import { PageHeader } from "@/components/layout/AppShell";
 import { Card } from "@/components/ui/Card";
 import { Alert } from "@/components/ui/Alert";
 import type { TrashedAccountListItem } from "@/components/accounts/AccountTrashList";
@@ -22,7 +22,6 @@ export default async function TrashPage() {
   const { user, profile } = await getAuthenticatedUserProfile();
   if (!user || !profile) redirect("/login");
 
-  const name = profile.full_name || user.email?.split("@")[0] || "User";
   const cookieStore = await cookies();
   const timeZone = resolveTimeZone(cookieStore.get(TIME_ZONE_COOKIE)?.value);
 
@@ -54,11 +53,7 @@ export default async function TrashPage() {
   }
 
   return (
-    <AppShell
-      userName={name}
-      userEmail={user.email}
-      currency={profile.default_currency}
-    >
+    <>
       <PageHeader
         eyebrow="Management"
         title="Trash"
@@ -102,6 +97,6 @@ export default async function TrashPage() {
           </>
         )}
       </div>
-    </AppShell>
+    </>
   );
 }
