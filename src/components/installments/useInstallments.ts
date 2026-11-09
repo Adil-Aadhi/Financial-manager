@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { INSTALLMENT_CATEGORY_NAME, installmentToday } from "@/lib/installments";
+import { INSTALLMENT_CATEGORY_NAME } from "@/lib/installments";
 import { offlineDb } from "@/lib/offline/db";
 import { useOfflineRefresh } from "@/lib/offline/useOfflineRefresh";
 import type { InstallmentsServerData } from "@/lib/supabase/installments";
 import { normalizeTransactionDate } from "@/lib/transactions";
+import { useIndiaToday } from "@/lib/useIndiaToday";
 
 /**
  * Installments read model: the device's IndexedDB copy once a complete snapshot exists (so the
@@ -62,17 +62,7 @@ export type InstallmentsData = ReturnType<typeof useInstallmentsData>;
 
 /** Today in the India calendar, refreshed every minute and when the app returns to the foreground. */
 export function useInstallmentToday(initial: string) {
-  const [today, setToday] = useState(initial);
-  useEffect(() => {
-    const tick = () => setToday(installmentToday());
-    const timer = window.setInterval(tick, 60_000);
-    document.addEventListener("visibilitychange", tick);
-    return () => {
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", tick);
-    };
-  }, []);
-  return today;
+  return useIndiaToday(initial);
 }
 
 const LAST_ACCOUNT_KEY = "ft:installments:last-account:";

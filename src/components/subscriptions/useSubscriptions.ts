@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { offlineDb } from "@/lib/offline/db";
 import { useOfflineRefresh } from "@/lib/offline/useOfflineRefresh";
 import type { SubscriptionsServerData } from "@/lib/supabase/subscriptions";
-import { subscriptionToday } from "@/lib/subscriptions";
+import { useIndiaToday } from "@/lib/useIndiaToday";
 
 export function useSubscriptionsData(ownerId: string, server: SubscriptionsServerData) {
   const version = [
@@ -29,18 +28,5 @@ export function useSubscriptionsData(ownerId: string, server: SubscriptionsServe
 }
 
 export function useSubscriptionToday(initial: string) {
-  const [today, setToday] = useState(initial);
-  useEffect(() => {
-    const tick = () => setToday(subscriptionToday());
-    const first = window.setTimeout(tick, 0);
-    const timer = window.setInterval(tick, 60_000);
-    const onVisible = () => document.visibilityState === "visible" && tick();
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      window.clearTimeout(first);
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, []);
-  return today;
+  return useIndiaToday(initial);
 }

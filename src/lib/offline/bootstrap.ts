@@ -17,7 +17,7 @@ import type { SubscriptionIconName } from "@/lib/subscriptions";
 import { normalizeTransactionDate } from "@/lib/transactions";
 
 const PAGE_SIZE = 500;
-const BOOTSTRAP_FRESH_MS = 60_000;
+const BOOTSTRAP_FRESH_MS = 10 * 60_000;
 const MISSING_OBJECT_CODES = new Set(["42P01", "PGRST205"]);
 
 /** Dispatched on window after a successful server mutation; mounted pages refresh on it. */

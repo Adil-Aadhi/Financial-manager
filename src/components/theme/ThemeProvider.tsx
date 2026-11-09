@@ -133,8 +133,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     listeners.forEach((l) => l());
   }, []);
 
+  const value = useMemo(
+    () => ({ theme, resolvedTheme, setTheme, accent, setAccent }),
+    [theme, resolvedTheme, setTheme, accent, setAccent]
+  );
+
   return (
-    <ThemeContext.Provider value={{ theme, resolvedTheme, setTheme, accent, setAccent }}>
+    <ThemeContext.Provider value={value}>
       {children}
     </ThemeContext.Provider>
   );

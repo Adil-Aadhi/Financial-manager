@@ -5,6 +5,25 @@ import { setActiveOwnerId } from "@/lib/offline/activeOwner";
 import { ensureOfflineBootstrap, OFFLINE_DATA_STALE_EVENT } from "@/lib/offline/bootstrap";
 import { useOnlineStatus } from "@/lib/offline/useOnlineStatus";
 
+const staleRefreshers = new Set<() => void>();
+
+function notifyStaleRefreshers() {
+  staleRefreshers.forEach((refreshStale) => refreshStale());
+}
+
+function subscribeToStaleData(refreshStale: () => void) {
+  staleRefreshers.add(refreshStale);
+  if (staleRefreshers.size === 1) {
+    window.addEventListener(OFFLINE_DATA_STALE_EVENT, notifyStaleRefreshers);
+  }
+  return () => {
+    staleRefreshers.delete(refreshStale);
+    if (staleRefreshers.size === 0) {
+      window.removeEventListener(OFFLINE_DATA_STALE_EVENT, notifyStaleRefreshers);
+    }
+  };
+}
+
 function refresh(ownerId: string, force: boolean, label: string) {
   void ensureOfflineBootstrap(ownerId, force).catch((error: unknown) => {
     if (navigator.onLine) {
@@ -36,7 +55,6 @@ export function useOfflineRefresh(ownerId: string, serverVersion: string, label:
 
   useEffect(() => {
     const onStale = () => refresh(ownerId, true, label);
-    window.addEventListener(OFFLINE_DATA_STALE_EVENT, onStale);
-    return () => window.removeEventListener(OFFLINE_DATA_STALE_EVENT, onStale);
+    return subscribeToStaleData(onStale);
   }, [label, ownerId]);
 }

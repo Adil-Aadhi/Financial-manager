@@ -1,7 +1,7 @@
-// v5: refreshed brand assets; route warming remains single-flight and bounded.
+// v6: route warming is single-flight, bounded, and avoids duplicate private asset copies.
 // The private cache keeps its name on purpose: its contents are unchanged, and renaming it
 // would make activate() delete every route saved for offline use.
-const CACHE_VERSION = "account-tracker-shell-v1";
+const CACHE_VERSION = "account-tracker-shell-v2";
 const PRIVATE_CACHE_VERSION = "account-tracker-private-v1";
 const ROUTE_CACHE_CONCURRENCY = 2;
 const OFFLINE_URL = "/offline";
@@ -149,6 +149,7 @@ async function runWithConcurrency(items, worker) {
 
 async function cacheRoutes(safeRoutes, generation, signal) {
   const cache = await caches.open(PRIVATE_CACHE_VERSION);
+  const shellCache = await caches.open(CACHE_VERSION);
   const assets = new Set();
 
   await runWithConcurrency(safeRoutes, async (route) => {
@@ -180,9 +181,10 @@ async function cacheRoutes(safeRoutes, generation, signal) {
   await runWithConcurrency([...assets].sort(), async (asset) => {
     try {
       if (generation !== privateCacheGeneration) return;
+      if ((await shellCache.match(asset)) || (await cache.match(asset))) return;
       const response = await fetch(new Request(asset, { credentials: "include", signal }));
       if (response.ok && generation === privateCacheGeneration) {
-        await cache.put(asset, response);
+        await shellCache.put(asset, response);
       }
     } catch {
       // A later runtime request can still cache this asset.
