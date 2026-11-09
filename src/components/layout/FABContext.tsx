@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useMemo } from "react";
+import React, { createContext, useCallback, useContext, useState, useMemo } from "react";
 import { usePathname } from "next/navigation";
 import { AddAccountModal } from "@/components/accounts/AddAccountModal";
 import { QuickTransactionModal } from "@/components/transactions/QuickTransactionModal";
@@ -57,48 +57,60 @@ export function FABProvider({ children }: { children: React.ReactNode }) {
     return "Action";
   }, [actionType]);
 
-  const triggerAction = () => {
+  const triggerAction = useCallback(() => {
     if (actionType === "add-category") {
       setIsAddCategoryOpen(true);
     } else {
       setIsQuickTransactionOpen(true);
     }
-  };
+  }, [actionType]);
 
-  const openAddAccount = () => setIsAddAccountOpen(true);
-  const openAddCategory = () => setIsAddCategoryOpen(true);
+  const openAddAccount = useCallback(() => setIsAddAccountOpen(true), []);
+  const openAddCategory = useCallback(() => setIsAddCategoryOpen(true), []);
 
-  const openQuickTransaction = (account?: AccountContextData) => {
+  const openQuickTransaction = useCallback((account?: AccountContextData) => {
     if (account) setActiveAccount(account);
     setIsQuickTransactionOpen(true);
-  };
+  }, []);
+
+  const value = useMemo(
+    () => ({
+      triggerAction,
+      openAddAccount,
+      openAddCategory,
+      openQuickTransaction,
+      activeAccount,
+      setActiveAccount,
+      actionType,
+      fabLabel,
+      fabTooltip,
+    }),
+    [
+      triggerAction,
+      openAddAccount,
+      openAddCategory,
+      openQuickTransaction,
+      activeAccount,
+      actionType,
+      fabLabel,
+      fabTooltip,
+    ]
+  );
 
   return (
     <FABContext.Provider
-      value={{
-        triggerAction,
-        openAddAccount,
-        openAddCategory,
-        openQuickTransaction,
-        activeAccount,
-        setActiveAccount,
-        actionType,
-        fabLabel,
-        fabTooltip,
-      }}
+      value={value}
     >
       {children}
 
       {/* Page-specific Modals managed centrally */}
-      <AddAccountModal
-        isOpen={isAddAccountOpen}
-        onClose={() => setIsAddAccountOpen(false)}
-      />
+      {isAddAccountOpen && (
+        <AddAccountModal isOpen onClose={() => setIsAddAccountOpen(false)} />
+      )}
 
-      <AddCategoryModal
-        isOpen={isAddCategoryOpen}
-        onClose={() => setIsAddCategoryOpen(false)}
-      />
+      {isAddCategoryOpen && (
+        <AddCategoryModal isOpen onClose={() => setIsAddCategoryOpen(false)} />
+      )}
 
       {isQuickTransactionOpen && (
         <QuickTransactionModal

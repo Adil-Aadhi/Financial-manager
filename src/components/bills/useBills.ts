@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { billToday } from "@/lib/bills";
 import { offlineDb } from "@/lib/offline/db";
 import { useOfflineRefresh } from "@/lib/offline/useOfflineRefresh";
 import type { BillsServerData } from "@/lib/supabase/bills";
+import { useIndiaToday } from "@/lib/useIndiaToday";
 
 export function useBillsData(ownerId: string, server: BillsServerData) {
   const version = [server.available, ...server.bills.map((bill) => `${bill.id}:${bill.next_due_date}:${bill.lifecycle}:${bill.updated_at ?? ""}`), ...server.payments.map((payment) => `${payment.id}:${payment.actual_amount}:${payment.updated_at ?? ""}`)].join("|");
@@ -23,12 +22,5 @@ export function useBillsData(ownerId: string, server: BillsServerData) {
 }
 
 export function useBillToday(initial: string) {
-  const [today, setToday] = useState(initial);
-  useEffect(() => {
-    const tick = () => setToday(billToday());
-    const timer = window.setInterval(tick, 60_000);
-    document.addEventListener("visibilitychange", tick);
-    return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", tick); };
-  }, []);
-  return today;
+  return useIndiaToday(initial);
 }

@@ -110,6 +110,14 @@
   --shadow-glow: 0 10px 34px -10px oklch(0.77 var(--accent-c) var(--accent-h) / 0.6);
 }
 
+/* Coarse-pointer/mobile devices get the same glass material with a smaller blur kernel. */
+@media (max-width: 767px), (pointer: coarse) {
+  :root {
+    --glass-blur: blur(24px) saturate(175%);
+    --glass-blur-strong: blur(32px) saturate(185%);
+  }
+}
+
 /* Category palette: fixed gradient pairs, same in both themes (white glyph on top).
    Consumed only through the `cat-tile` utility / <CategoryTile />. */
 :root {
@@ -161,7 +169,6 @@
 
   --animate-rise: rise 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
   --animate-fade: fade 0.4s ease-out both;
-  --animate-aurora: aurora 22s ease-in-out infinite alternate;
   --animate-float: float 7s ease-in-out infinite;
   --animate-shake: shake 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
   --animate-sheet: sheet 0.38s cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -192,11 +199,6 @@
   @keyframes fade-out {
     from { opacity: 1; }
     to { opacity: 0; }
-  }
-  @keyframes aurora {
-    0% { transform: translate3d(0, 0, 0) scale(1); }
-    50% { transform: translate3d(4%, -3%, 0) scale(1.08); }
-    100% { transform: translate3d(-3%, 4%, 0) scale(0.96); }
   }
   @keyframes float {
     0%, 100% { transform: translateY(0); }
@@ -343,6 +345,7 @@
   [data-theme="dark"] { --glass: rgb(22 26 35 / 0.94); --glass-strong: rgb(18 22 30 / 0.97); }
 }
 @media (prefers-reduced-transparency: reduce) {
+  :root { --glass-blur: none; --glass-blur-strong: none; }
   [data-theme="light"] { --glass: rgb(255 255 255 / 0.94); --glass-strong: rgb(255 255 255 / 0.97); }
   [data-theme="dark"] { --glass: rgb(22 26 35 / 0.95); --glass-strong: rgb(18 22 30 / 0.98); }
 }

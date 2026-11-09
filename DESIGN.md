@@ -13,8 +13,8 @@ primitives) rather than hard-coding one-off styles, then document the addition h
 
 1. **Calm and premium.** The app shows people's money, so it should feel trustworthy and quiet.
    Use generous spacing and few colours, and let the numbers carry the emphasis.
-2. **Glass on aurora.** Content sits on translucent, blurred panels floating above a slowly
-   drifting colour backdrop (`<AuroraBackground />`). Glass only works if there is something
+2. **Glass on aurora.** Content sits on translucent, blurred panels floating above a static
+   colour backdrop (`<AuroraBackground />`). Glass only works if there is something
    behind it, so every full-page layout renders the aurora once.
 3. **Semantic tokens only.** Never write `bg-white`, `text-slate-600`, `dark:bg-zinc-900` or
    hex values in components. Use the tokens below. Light/dark switching happens in the
@@ -118,9 +118,10 @@ Example card:
 ```
 
 **Materials (Apple-style):** blur and saturation come from the `--glass-blur` / `--glass-blur-strong`
-tokens (44px and 64px, saturate 190–210%), and the fills are opaque enough that body text stays readable over
-the aurora. Tune them only in `globals.css`. When `backdrop-filter` is unsupported, or the user has
-*Reduce Transparency* on, panels automatically switch to near-solid fills.
+tokens (44px and 64px on desktop; 24px and 32px on coarse-pointer/mobile devices), and the fills are
+opaque enough that body text stays readable over the aurora. Tune them only in `globals.css`. When
+`backdrop-filter` is unsupported, or the user has *Reduce Transparency* on, panels automatically switch
+to near-solid fills; Reduce Transparency also disables the blur filter.
 
 Rules:
 - **Only top-level surfaces blur** (navbar, cards, the auth card, popovers, the tab bar). Controls inside them
@@ -172,7 +173,6 @@ Defined as Tailwind animations in `globals.css`:
 | `animate-float` | Decorative floating chips (marketing/illustration only) |
 | `animate-shake` | Invalid OTP / failed submission feedback |
 | `animate-sheet` | Bottom sheet sliding up (Modal on mobile) |
-| `animate-aurora` | Background blobs only |
 
 Keep durations between 150 and 300ms for interactions. `prefers-reduced-motion` disables
 motion globally, so don't work around it.

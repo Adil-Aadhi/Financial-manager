@@ -12,7 +12,8 @@ import { requestSync, startSyncEngine } from "@/lib/offline/sync";
 
 // Keep this in sync with public/sw.js. A new worker version gets one fresh route-warm
 // signature without permanently disabling future warming.
-const ROUTE_WARM_VERSION = "account-tracker-shell-v1";
+const ROUTE_WARM_VERSION = "account-tracker-shell-v2";
+const ROUTE_WARM_DELAY_MS = 2_000;
 const FIXED_OFFLINE_ROUTES = [
   "/home",
   "/transactions",
@@ -36,8 +37,8 @@ export function OfflineDataProvider({ children }: { children: React.ReactNode })
     let watchedUserId: string | null = null;
     let accountRouteSubscription: Subscription | null = null;
     const bootstrapJobs = new Map<string, Promise<void>>();
-    const routeWarmJobs = new Map<string, Promise<void>>();
     const warmedRouteSignatures = new Set<string>();
+    let routeWarmTimer: number | null = null;
     let privateCacheReset: Promise<void> = Promise.resolve();
 
     const warmRoutesOnce = (userId: string, activeAccountIds: string[]) => {
@@ -45,31 +46,42 @@ export function OfflineDataProvider({ children }: { children: React.ReactNode })
 
       const sortedAccountIds = [...new Set(activeAccountIds)].sort();
       const signature = [ROUTE_WARM_VERSION, userId, ...sortedAccountIds].join("|");
-      if (warmedRouteSignatures.has(signature) || routeWarmJobs.has(signature)) return;
+      if (routeWarmTimer !== null) {
+        window.clearTimeout(routeWarmTimer);
+        routeWarmTimer = null;
+      }
+      if (warmedRouteSignatures.has(signature)) return;
 
       const routes = [
         ...FIXED_OFFLINE_ROUTES,
         ...sortedAccountIds.map((accountId) => `/accounts/${accountId}`),
       ];
-      const job = navigator.serviceWorker.ready
-        .then((registration) => {
-          if (cancelled || authenticatedUserId !== userId) return;
-          const worker = navigator.serviceWorker.controller ?? registration.active;
-          if (!worker) return;
-          worker.postMessage({ type: "CACHE_ROUTES", routes });
-          warmedRouteSignatures.add(signature);
-        })
-        .catch((error: unknown) => {
-          if (navigator.onLine) {
-            console.warn(
-              "Offline route warming failed:",
-              error instanceof Error ? error.message : error
-            );
-          }
-        })
-        .finally(() => routeWarmJobs.delete(signature));
+      routeWarmTimer = window.setTimeout(() => {
+        routeWarmTimer = null;
+        if (
+          cancelled ||
+          authenticatedUserId !== userId ||
+          !navigator.onLine ||
+          document.visibilityState !== "visible"
+        ) return;
 
-      routeWarmJobs.set(signature, job);
+        void navigator.serviceWorker.ready
+          .then((registration) => {
+            if (cancelled || authenticatedUserId !== userId) return;
+            const worker = navigator.serviceWorker.controller ?? registration.active;
+            if (!worker) return;
+            worker.postMessage({ type: "CACHE_ROUTES", routes });
+            warmedRouteSignatures.add(signature);
+          })
+          .catch((error: unknown) => {
+            if (navigator.onLine) {
+              console.warn(
+                "Offline route warming failed:",
+                error instanceof Error ? error.message : error
+              );
+            }
+          });
+      }, ROUTE_WARM_DELAY_MS);
     };
 
     const watchAccountRoutes = (userId: string) => {
@@ -163,6 +175,7 @@ export function OfflineDataProvider({ children }: { children: React.ReactNode })
 
     return () => {
       cancelled = true;
+      if (routeWarmTimer !== null) window.clearTimeout(routeWarmTimer);
       accountRouteSubscription?.unsubscribe();
       authListener.subscription.unsubscribe();
     };

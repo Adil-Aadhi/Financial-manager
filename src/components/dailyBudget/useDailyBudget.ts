@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { dailyBudgetToday, type DailyExpenseRecord, type DailyLimitRecord } from "@/lib/dailyBudget";
+import type { DailyExpenseRecord, DailyLimitRecord } from "@/lib/dailyBudget";
 import { offlineDb } from "@/lib/offline/db";
 import { useOfflineRefresh } from "@/lib/offline/useOfflineRefresh";
 import type { DailyBudgetServerData } from "@/lib/supabase/dailyBudget";
+import { useIndiaToday } from "@/lib/useIndiaToday";
 
 export interface DailyBudgetData {
   /** "local": read from this device (works offline). "server": first-render fallback. */
@@ -45,22 +45,5 @@ export function useDailyBudgetData(ownerId: string, server: DailyBudgetServerDat
 
 /** Today's date in India, kept current if the app stays open past midnight. */
 export function useDailyBudgetToday(initial: string) {
-  const [today, setToday] = useState(initial);
-  useEffect(() => {
-    const tick = () => setToday(dailyBudgetToday());
-    // The server's date can be stale (a page saved for offline use yesterday), so re-check
-    // straight after mounting, then every minute.
-    const first = window.setTimeout(tick, 0);
-    const timer = window.setInterval(tick, 60_000);
-    const onVisible = () => {
-      if (document.visibilityState === "visible") tick();
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      window.clearTimeout(first);
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, []);
-  return today;
+  return useIndiaToday(initial);
 }

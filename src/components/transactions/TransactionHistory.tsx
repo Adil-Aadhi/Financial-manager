@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useRef, useState, useTransition } from "react";
+import React, { useCallback, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { CalendarDays, Lock, Pencil, Search, SlidersHorizontal, Trash2, X } from "lucide-react";
@@ -30,6 +30,7 @@ import {
 type TransactionFilter = "all" | TransactionType;
 const SWIPE_ACTION_WIDTH = 84;
 const SWIPE_REVEAL_THRESHOLD = 36;
+const TRANSACTION_PAGE_SIZE = 40;
 
 interface SwipeGesture {
   pointerId: number;
@@ -106,6 +107,7 @@ export function TransactionHistory({
   const [deletingTransaction, setDeletingTransaction] = useState<TransactionRecord | null>(null);
   const [viewingManaged, setViewingManaged] = useState<{ transaction: TransactionRecord; info: ManagedTransactionInfo } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [visibleLimit, setVisibleLimit] = useState(TRANSACTION_PAGE_SIZE);
 
   const visibleTransactions = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
@@ -140,6 +142,30 @@ export function TransactionHistory({
     return [...byDay.entries()];
   }, [visibleTransactions]);
 
+  const renderedGroups = useMemo(() => {
+    let remaining = visibleLimit;
+    const rendered: typeof groups = [];
+    for (const [day, group] of groups) {
+      if (remaining <= 0) break;
+      const items = group.items.slice(0, remaining);
+      rendered.push([day, { ...group, items }]);
+      remaining -= items.length;
+    }
+    return rendered;
+  }, [groups, visibleLimit]);
+
+  const handleEdit = useCallback(
+    (transaction: TransactionRecord, info?: ManagedTransactionInfo) => {
+      if (info) setViewingManaged({ transaction, info });
+      else setEditingTransaction(transaction);
+    },
+    []
+  );
+  const handleDelete = useCallback(
+    (transaction: TransactionRecord) => setDeletingTransaction(transaction),
+    []
+  );
+
   const hasAdvancedFilter = Boolean(startDate || endDate || categoryId);
   const hasFilters = Boolean(search || hasAdvancedFilter || filter !== "all");
   const invalidDraftRange = Boolean(
@@ -158,6 +184,7 @@ export function TransactionHistory({
     setStartDate(draftStartDate);
     setEndDate(draftEndDate);
     setCategoryId(draftCategoryId);
+    setVisibleLimit(TRANSACTION_PAGE_SIZE);
     setIsFilterOpen(false);
   };
 
@@ -179,14 +206,20 @@ export function TransactionHistory({
               <span className="sr-only">Search transactions</span>
               <input
                 value={search}
-                onChange={(event) => setSearch(event.target.value)}
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  setVisibleLimit(TRANSACTION_PAGE_SIZE);
+                }}
                 placeholder="Search"
                 className="w-full min-w-0 bg-transparent text-base text-fg outline-none placeholder:text-fg-subtle sm:text-sm"
               />
               {search && (
                 <button
                   type="button"
-                  onClick={() => setSearch("")}
+                  onClick={() => {
+                    setSearch("");
+                    setVisibleLimit(TRANSACTION_PAGE_SIZE);
+                  }}
                   aria-label="Clear search"
                   className="cursor-pointer text-fg-subtle hover:text-fg"
                 >
@@ -222,7 +255,10 @@ export function TransactionHistory({
                   type="button"
                   role="tab"
                   aria-selected={active}
-                  onClick={() => setFilter(option)}
+                  onClick={() => {
+                    setFilter(option);
+                    setVisibleLimit(TRANSACTION_PAGE_SIZE);
+                  }}
                   className={cn(
                     "h-8 shrink-0 cursor-pointer rounded-full border px-3.5 text-xs font-semibold capitalize transition-all duration-200",
                     active
@@ -250,7 +286,7 @@ export function TransactionHistory({
           />
         ) : (
           <div className="space-y-4">
-            {groups.map(([day, group]) => (
+            {renderedGroups.map(([day, group]) => (
               <section key={day || "undated"} aria-label={formatDayHeading(day)}>
                 <header className="mb-1.5 flex items-center justify-between px-1 text-xs">
                   <h3 className="font-semibold text-fg-muted">{formatDayHeading(day)}</h3>
@@ -270,17 +306,27 @@ export function TransactionHistory({
                       transaction={transaction}
                       currency={currency}
                       managed={managed?.get(transaction.id)}
-                      onEdit={() => {
-                        const info = managed?.get(transaction.id);
-                        if (info) setViewingManaged({ transaction, info });
-                        else setEditingTransaction(transaction);
-                      }}
-                      onDelete={() => setDeletingTransaction(transaction)}
+                      onEdit={handleEdit}
+                      onDelete={handleDelete}
                     />
                   ))}
                 </ul>
               </section>
             ))}
+            {visibleLimit < visibleTransactions.length && (
+              <div className="flex flex-col items-center gap-2 pt-1">
+                <p className="text-xs text-fg-subtle">
+                  Showing {visibleLimit} of {visibleTransactions.length} transactions
+                </p>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setVisibleLimit((limit) => limit + TRANSACTION_PAGE_SIZE)}
+                >
+                  Load more
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -431,7 +477,7 @@ export function TransactionHistory({
 }
 
 /** Tap the row to edit (delete lives in the edit sheet). Hover icons on desktop. */
-function TransactionRow({
+const TransactionRow = React.memo(function TransactionRow({
   transaction,
   currency,
   managed,
@@ -441,8 +487,8 @@ function TransactionRow({
   transaction: TransactionRecord;
   currency: SupportedCurrency;
   managed?: ManagedTransactionInfo;
-  onEdit: () => void;
-  onDelete: () => void;
+  onEdit: (transaction: TransactionRecord, managed?: ManagedTransactionInfo) => void;
+  onDelete: (transaction: TransactionRecord) => void;
 }) {
   const [swipeOffset, setSwipeOffset] = useState(0);
   const [isSwiping, setIsSwiping] = useState(false);
@@ -528,7 +574,7 @@ function TransactionRow({
             tabIndex={revealed ? 0 : -1}
             onClick={() => {
               setSwipeOffset(0);
-              onDelete();
+              onDelete(transaction);
             }}
             aria-label={`Delete ${title}`}
             className="flex w-full touch-manipulation cursor-pointer flex-col items-center justify-center gap-1 text-[11px] font-semibold text-danger"
@@ -542,7 +588,7 @@ function TransactionRow({
         type="button"
         onClick={() => {
           if (suppressClickRef.current) return;
-          onEdit();
+          onEdit(transaction, managed);
         }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -576,14 +622,14 @@ function TransactionRow({
         </p>
       </button>
       {!managed && <div className="hidden shrink-0 gap-1 pr-3 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 lg:flex">
-        <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onEdit} aria-label={`Edit ${title}`}>
+        <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => onEdit(transaction)} aria-label={`Edit ${title}`}>
           <Pencil className="h-3.5 w-3.5" />
         </Button>
         <Button
           variant="ghost"
           size="sm"
           className="h-8 w-8 p-0 text-danger hover:bg-danger/10 hover:text-danger"
-          onClick={onDelete}
+          onClick={() => onDelete(transaction)}
           aria-label={`Delete ${title}`}
         >
           <Trash2 className="h-3.5 w-3.5" />
@@ -591,7 +637,7 @@ function TransactionRow({
       </div>}
     </li>
   );
-}
+});
 
 function DeleteTransactionModal({
   transaction,
