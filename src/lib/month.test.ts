@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   TRANSACTION_CALENDAR_TIME_ZONE,
+  getRecentMonthKeys,
   getTransactionMonthRange,
 } from "@/lib/month";
 import { getReportRange } from "@/lib/reports";
@@ -28,5 +29,25 @@ describe("India transaction month boundaries", () => {
     expect(
       getReportRange({ range: "this-year" }, TRANSACTION_CALENDAR_TIME_ZONE, now)
     ).toMatchObject({ start: "2026-01-01", end: "2026-12-31" });
+  });
+
+  it("calculates rolling recent month keys correctly across years", () => {
+    expect(getRecentMonthKeys("2026-11", 6)).toEqual([
+      "2026-06",
+      "2026-07",
+      "2026-08",
+      "2026-09",
+      "2026-10",
+      "2026-11",
+    ]);
+
+    expect(getRecentMonthKeys("2026-03", 6)).toEqual([
+      "2025-10",
+      "2025-11",
+      "2025-12",
+      "2026-01",
+      "2026-02",
+      "2026-03",
+    ]);
   });
 });
