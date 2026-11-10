@@ -6,7 +6,6 @@ import { useLiveQuery } from "dexie-react-hooks";
 import {
   ArrowDownLeft,
   ArrowUpRight,
-  BarChart3,
   Landmark,
   PieChart,
   PiggyBank,
@@ -15,6 +14,7 @@ import {
 } from "lucide-react";
 import { MonthlyBudgetCard } from "@/components/budget/MonthlyBudgetCard";
 import { CategoryTile, categoryStyle } from "@/components/categories/CategoryIcon";
+import { CashFlowChart } from "@/components/home/CashFlowChart";
 import { Card, CardLink } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SectionRefreshIndicator } from "@/components/ui/SectionRefreshIndicator";
@@ -23,7 +23,8 @@ import { formatMoney } from "@/lib/format";
 import { offlineDb } from "@/lib/offline/db";
 import { useOfflineRefresh } from "@/lib/offline/useOfflineRefresh";
 import { useLocalContentMark } from "@/lib/perf";
-import type { MonthRange } from "@/lib/month";
+import { getRecentMonthKeys, type MonthRange } from "@/lib/month";
+import type { MonthTotal } from "@/lib/reports";
 import type { SupportedCurrency } from "@/lib/supabase/profile";
 import { normalizeIncludeInSummary } from "@/lib/accountSummary";
 import { normalizeTransactionDate } from "@/lib/transactions";
@@ -269,7 +270,14 @@ function HomeDashboard({
               <EmptyState icon={<ReceiptText className="h-5 w-5" />} title="No transactions yet" description="Tap + to record your first income or expense." />
             )}
           </Card>
-          <Card title="Cash flow" description="Income vs expenses · last 6 months"><EmptyChart /></Card>
+          <Card
+            title="Cash flow"
+            description="Income vs expenses · last 6 months"
+            action={<CardLink href="/reports">View report</CardLink>}
+            bodyClassName="pt-3"
+          >
+            <CashFlowChart months={data.cashFlow} currency={currency} />
+          </Card>
         </div>
 
         <div className="space-y-4 sm:space-y-5">
@@ -320,6 +328,11 @@ export function calculateDashboard(snapshot: HomeSnapshot, currency: SupportedCu
   let monthIncome = 0;
   let monthExpense = 0;
 
+  const cashFlowMonths = getRecentMonthKeys(monthPrefix, 6);
+  const cashFlowMap = new Map<string, { income: number; expense: number }>(
+    cashFlowMonths.map((key) => [key, { income: 0, expense: 0 }])
+  );
+
   for (const account of summaryAccounts) {
     if ((account.currency || currency) === currency) balance += Number(account.opening_balance) || 0;
   }
@@ -334,6 +347,20 @@ export function calculateDashboard(snapshot: HomeSnapshot, currency: SupportedCu
     if ((accountById.get(transaction.account_id)?.currency || currency) !== currency) continue;
     if (transaction.type === "income") balance += amount;
     if (transaction.type === "expense") balance -= amount;
+
+    // 6-month cash flow aggregation (strictly income and expense; transfers and unsupported types ignored)
+    if (transaction.type === "income" || transaction.type === "expense") {
+      const txDate = normalizeTransactionDate(transaction.transaction_date);
+      if (txDate) {
+        const txMonth = txDate.slice(0, 7);
+        const monthEntry = cashFlowMap.get(txMonth);
+        if (monthEntry) {
+          if (transaction.type === "income") monthEntry.income += amount;
+          else monthEntry.expense += amount;
+        }
+      }
+    }
+
     if (!normalizeTransactionDate(transaction.transaction_date)?.startsWith(monthPrefix)) continue;
     if (transaction.type === "income") monthIncome += amount;
     if (transaction.type === "expense") {
@@ -344,6 +371,23 @@ export function calculateDashboard(snapshot: HomeSnapshot, currency: SupportedCu
       spendByCategory.set(key, entry);
     }
   }
+
+  const cashFlow: MonthTotal[] = cashFlowMonths.map((key) => {
+    const [y, m] = key.split("-").map(Number);
+    const totals = cashFlowMap.get(key) ?? { income: 0, expense: 0 };
+    const date = new Date(Date.UTC(y, m - 1, 1));
+    const income = Math.round(totals.income * 100) / 100;
+    const expense = Math.round(totals.expense * 100) / 100;
+    return {
+      key,
+      label: new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric", timeZone: "UTC" }).format(date),
+      shortLabel: new Intl.DateTimeFormat("en-IN", { month: "short", timeZone: "UTC" }).format(date),
+      income,
+      expense,
+      net: Math.round((income - expense) * 100) / 100,
+    };
+  });
+
   const recent = [...transactions]
     .sort((a, b) =>
       `${normalizeTransactionDate(b.transaction_date) ?? ""}|${b.created_at}`.localeCompare(
@@ -362,6 +406,7 @@ export function calculateDashboard(snapshot: HomeSnapshot, currency: SupportedCu
     saved: monthIncome - monthExpense,
     currencyAccountCount: summaryAccounts.filter((account) => (account.currency || currency) === currency).length,
     topSpending: [...spendByCategory.values()].sort((a, b) => b.total - a.total),
+    cashFlow,
   };
 }
 
@@ -381,9 +426,4 @@ function TopSpending({ items, total, currency }: { items: { name: string; icon: 
 
 function MonthStat({ label, value, icon, tone }: { label: string; value: string; icon: React.ReactNode; tone: "positive" | "negative" | "neutral" }) {
   return <div className="min-w-0 rounded-2xl border border-line bg-glass-hover p-2.5 sm:p-4"><span className={cn("flex h-6 w-6 items-center justify-center rounded-lg", tone === "positive" && "bg-positive/12 text-positive", tone === "negative" && "bg-danger/12 text-danger", tone === "neutral" && "bg-accent-3/12 text-accent-3")}>{icon}</span><p className="mt-2 text-[11px] font-medium text-fg-subtle">{label}</p><p className={cn("mt-0.5 truncate font-money text-sm font-semibold sm:text-base", tone === "positive" && "text-positive", tone === "negative" && "text-danger", tone === "neutral" && "text-fg")}>{value}</p></div>;
-}
-
-function EmptyChart() {
-  const bars = [38, 55, 30, 62, 45, 70];
-  return <div className="relative"><div className="flex h-40 items-end justify-between gap-3 px-1" aria-hidden="true">{bars.map((height, index) => <div key={index} className="flex flex-1 items-end justify-center gap-1"><span className="w-full max-w-4 rounded-t-md bg-line-strong" style={{ height: `${height}%` }} /><span className="w-full max-w-4 rounded-t-md bg-line" style={{ height: `${height * 0.7}%` }} /></div>)}</div><div className="absolute inset-0 flex flex-col items-center justify-center"><span className="glass flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium text-fg-muted"><BarChart3 className="h-3.5 w-3.5 text-accent" />Your trend appears after a few transactions</span></div></div>;
 }

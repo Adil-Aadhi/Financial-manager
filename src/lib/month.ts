@@ -63,3 +63,23 @@ export function getMonthRange(timeZone: string, now = new Date()): MonthRange {
 export function getTransactionMonthRange(now = new Date()) {
   return getMonthRange(TRANSACTION_CALENDAR_TIME_ZONE, now);
 }
+
+/**
+ * Return an array of the latest N calendar month prefixes ("YYYY-MM") ending with the
+ * specified monthPrefix (inclusive), in chronological order.
+ */
+export function getRecentMonthKeys(currentMonthPrefix: string, count = 6): string[] {
+  const [yearStr, monthStr] = currentMonthPrefix.split("-");
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || count <= 0) return [currentMonthPrefix];
+
+  const keys: string[] = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const d = new Date(Date.UTC(year, month - 1 - i, 1));
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+    keys.push(`${y}-${m}`);
+  }
+  return keys;
+}
