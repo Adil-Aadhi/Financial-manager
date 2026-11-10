@@ -18,6 +18,14 @@
 :root {
   --accent-h: 163;
   --accent-c: 0.14;
+
+  /* Account Tracker launch surface. Fixed to the notebook-and-pen identity. */
+  --launch-canvas: #07080d;
+  --launch-canvas-deep: #020307;
+  --launch-fg: #fff8f3;
+  --launch-muted: rgb(255 235 224 / 0.62);
+  --launch-brand-1: #ff8a3d;
+  --launch-brand-2: #ef3f2c;
 }
 
 :root,
@@ -358,4 +366,147 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ---------------------------------------------------------- app launch -- */
+
+.app-launch-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  min-height: 100dvh;
+  place-items: center;
+  overflow: hidden;
+  padding:
+    max(2rem, env(safe-area-inset-top))
+    max(1.5rem, env(safe-area-inset-right))
+    max(2rem, env(safe-area-inset-bottom))
+    max(1.5rem, env(safe-area-inset-left));
+  color: var(--launch-fg);
+  background:
+    radial-gradient(circle at 50% 42%, rgb(239 63 44 / 0.12), transparent 34%),
+    linear-gradient(160deg, var(--launch-canvas), var(--launch-canvas-deep));
+  isolation: isolate;
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 420ms ease, visibility 420ms step-end;
+}
+
+.app-launch-screen[data-phase="leaving"] {
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+}
+
+.app-launch-aurora {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(circle at 20% 85%, rgb(255 138 61 / 0.08), transparent 28%),
+    radial-gradient(circle at 82% 12%, rgb(239 63 44 / 0.07), transparent 25%);
+}
+
+.app-launch-brand {
+  display: flex;
+  width: min(100%, 22rem);
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.app-launch-mark {
+  position: relative;
+  display: grid;
+  height: 7.5rem;
+  width: 7.5rem;
+  place-items: center;
+  animation: launch-mark-in 720ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: transform, opacity;
+}
+
+.app-launch-mark::before {
+  content: "";
+  position: absolute;
+  inset: 0.75rem;
+  z-index: -1;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgb(255 104 47 / 0.28), transparent 68%);
+  filter: blur(14px);
+  animation: launch-glow 2.4s ease-in-out infinite;
+}
+
+.app-launch-mark > img {
+  transform: scale(1.28);
+}
+
+.app-launch-copy {
+  margin-top: 1.2rem;
+  animation: launch-copy-in 650ms 120ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.app-launch-name {
+  font-size: clamp(1.75rem, 8vw, 2.25rem);
+  font-weight: 650;
+  letter-spacing: -0.035em;
+  line-height: 1;
+}
+
+.app-launch-name span {
+  background-image: linear-gradient(110deg, var(--launch-brand-1), var(--launch-brand-2));
+  background-clip: text;
+  color: transparent;
+  -webkit-background-clip: text;
+}
+
+.app-launch-tagline {
+  margin-top: 0.85rem;
+  color: var(--launch-muted);
+  font-size: 0.65rem;
+  font-weight: 650;
+  letter-spacing: 0.22em;
+}
+
+.app-launch-progress {
+  position: relative;
+  width: 5.5rem;
+  height: 2px;
+  margin-top: 2.25rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.1);
+  animation: launch-copy-in 500ms 260ms ease-out both;
+}
+
+.app-launch-progress > span {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background-image: linear-gradient(90deg, var(--launch-brand-1), var(--launch-brand-2));
+  transform-origin: left center;
+  animation: launch-progress 1.25s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+@keyframes launch-mark-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.82); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes launch-copy-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes launch-glow {
+  0%, 100% { opacity: 0.65; transform: scale(0.92); }
+  50% { opacity: 1; transform: scale(1.08); }
+}
+
+@keyframes launch-progress {
+  0% { opacity: 0; transform: translateX(-100%) scaleX(0.35); }
+  35% { opacity: 1; }
+  70% { opacity: 1; transform: translateX(35%) scaleX(0.72); }
+  100% { opacity: 0; transform: translateX(115%) scaleX(0.28); }
 }

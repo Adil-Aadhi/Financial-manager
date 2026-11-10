@@ -6,6 +6,7 @@ import { accentInitScript } from "@/components/theme/accent";
 import { timeZoneCookieScript } from "@/lib/month";
 import { OfflineDataProvider } from "@/components/offline/OfflineDataProvider";
 import { ServiceWorkerRegistration } from "@/components/pwa/ServiceWorkerRegistration";
+import { AppLaunchScreen } from "@/components/pwa/AppLaunchScreen";
 import { PendingChangesNotice } from "@/components/offline/PendingChangesNotice";
 import "./globals.css";
 
@@ -64,6 +65,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <script dangerouslySetInnerHTML={{ __html: themeInitScript + ";" + accentInitScript + ";" + timeZoneCookieScript }} />
       </head>
       <body className="min-h-full flex flex-col">
+        <AppLaunchScreen />
         <ThemeProvider>
           <OfflineDataProvider>{children}</OfflineDataProvider>
           <ServiceWorkerRegistration />
