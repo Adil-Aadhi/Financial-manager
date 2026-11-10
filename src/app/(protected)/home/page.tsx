@@ -9,7 +9,7 @@ import { DailyBudgetHomeCard } from "@/components/dailyBudget/DailyBudgetHomeCar
 import { SubscriptionHomeCard } from "@/components/subscriptions/SubscriptionHomeCard";
 import { BillsHomeCard } from "@/components/bills/BillsHomeCard";
 import { InstallmentsHomeCard } from "@/components/installments/InstallmentsHomeCard";
-import { AppShell, PageHeader } from "@/components/layout/AppShell";
+import { PageHeader } from "@/components/layout/AppShell";
 import { dailyBudgetToday, monthFirstDay, monthOfDate } from "@/lib/dailyBudget";
 import { getDailyBudgetServerData } from "@/lib/supabase/dailyBudget";
 import { getTransactionMonthRange } from "@/lib/month";
@@ -125,7 +125,7 @@ export default async function HomePage() {
   });
 
   return (
-    <AppShell userName={name} userEmail={user.email} currency={profile.default_currency}>
+    <>
       <PageHeader eyebrow="Overview" title={`Hi, ${name.split(" ")[0]}`} />
       <OfflineHomeDashboard
         ownerId={user.id}
@@ -169,6 +169,6 @@ export default async function HomePage() {
           />
         }
       />
-    </AppShell>
+    </>
   );
 }

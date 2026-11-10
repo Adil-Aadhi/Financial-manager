@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 
 export type SupportedCurrency = "INR" | "USD" | "AED";
@@ -28,7 +29,7 @@ export interface AuthenticatedUser {
  * Server Actions keep calling getUser() before any write, and RLS verifies the same JWT on
  * every query below.
  */
-export async function getAuthenticatedUserProfile() {
+export const getAuthenticatedUserProfile = cache(async function getAuthenticatedUserProfile() {
   const supabase = await createClient();
   const { data: claimsData, error: authError } = await supabase.auth.getClaims();
   const claims = claimsData?.claims;
@@ -68,4 +69,4 @@ export async function getAuthenticatedUserProfile() {
   };
 
   return { user, profile: resolvedProfile };
-}
+});

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { AccountFABRegistrar } from "@/components/accounts/AccountFABRegistrar";
 import { OfflineAccountDetails } from "@/components/accounts/OfflineAccountDetails";
-import { AppShell, PageHeader } from "@/components/layout/AppShell";
+import { PageHeader } from "@/components/layout/AppShell";
 import { Alert } from "@/components/ui/Alert";
 import { getManagedTransactionsForAccount } from "@/lib/supabase/installments";
 import { getAuthenticatedUserProfile } from "@/lib/supabase/profile";
@@ -145,10 +145,8 @@ export default async function AccountDetailsPage({ params }: AccountPageProps) {
   // Read only: which of these expenses are managed by Installments (shown read-only).
   const managedTransactions = serverMissing ? [] : await getManagedTransactionsForAccount(supabase, user.id, id);
 
-  const userName = profile.full_name || user.email?.split("@")[0] || "User";
-
   return (
-    <AppShell userName={userName} userEmail={user.email} currency={profile.default_currency}>
+    <>
       <AccountFABRegistrar account={{ id: accountData.id, name: accountData.name }} />
 
       <PageHeader
@@ -178,6 +176,6 @@ export default async function AccountDetailsPage({ params }: AccountPageProps) {
           serverMissing={serverMissing}
         />
       </div>
-    </AppShell>
+    </>
   );
 }

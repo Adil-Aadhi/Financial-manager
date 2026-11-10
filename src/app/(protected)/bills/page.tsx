@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { AppShell, PageHeader } from "@/components/layout/AppShell";
+import { PageHeader } from "@/components/layout/AppShell";
 import { BillTracker } from "@/components/bills/BillTracker";
 import { billToday } from "@/lib/bills";
 import { getAuthenticatedUserProfile } from "@/lib/supabase/profile";
@@ -15,6 +15,5 @@ export default async function BillsPage({ searchParams }: { searchParams: Promis
   if (!user || !profile) redirect("/login");
   const server = await getBillsServerData(await createClient(), user.id);
   const params = await searchParams;
-  const name = profile.full_name || user.email?.split("@")[0] || "there";
-  return <AppShell userName={name} userEmail={user.email} currency={profile.default_currency}><PageHeader eyebrow="Planning" title="Bills" description="Household and recurring-payment reminders. No account balances are changed." /><BillTracker ownerId={user.id} currency={profile.default_currency} server={server} serverToday={billToday()} initialSelectedId={params.selected} initiallyAdding={params.add === "1"} /></AppShell>;
+  return <><PageHeader eyebrow="Planning" title="Bills" description="Household and recurring-payment reminders. No account balances are changed." /><BillTracker ownerId={user.id} currency={profile.default_currency} server={server} serverToday={billToday()} initialSelectedId={params.selected} initiallyAdding={params.add === "1"} /></>;
 }
