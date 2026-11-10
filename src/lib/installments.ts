@@ -562,6 +562,25 @@ export interface UpcomingInstallment {
   plan: InstallmentPlanRecord;
   row: InstallmentScheduleRow;
   progressLabel: string;
+  progress: number;
+}
+
+/**
+ * Progress of the current installment billing cycle (0-100%).
+ * Measured from the previous installment's due date (or plan start_date for installment 1)
+ * to this installment's due date.
+ */
+export function installmentProgress(
+  plan: Pick<InstallmentPlanRecord, "start_date" | "first_due_date" | "billing_cycle" | "billing_interval">,
+  row: Pick<InstallmentScheduleRow, "number" | "dueDate" | "status">,
+  today: string
+): number {
+  if (row.status === "paid" || row.status === "closed") return 100;
+  const calculatedStart = installmentDueDate(plan, row.number - 1);
+  const start = plan.start_date > calculatedStart ? plan.start_date : calculatedStart;
+  const total = Math.max(1, daysBetween(start, row.dueDate));
+  const elapsed = daysBetween(start, today);
+  return Math.min(100, Math.max(0, Math.round((elapsed / total) * 100)));
 }
 
 /** Unpaid installments of active plans only, soonest first (overdue ones first of all). */
@@ -576,7 +595,12 @@ export function upcomingInstallments(
     const summary = summarizePlan(plan, payments, today);
     const next = summary.nextRow;
     if (!next) continue;
-    items.push({ plan, row: next, progressLabel: `${summary.settledCount}/${plan.installment_count}` });
+    items.push({
+      plan,
+      row: next,
+      progressLabel: `${summary.settledCount}/${plan.installment_count}`,
+      progress: installmentProgress(plan, next, today),
+    });
   }
   return items.sort((a, b) => a.row.dueDate.localeCompare(b.row.dueDate) || a.plan.name.localeCompare(b.plan.name));
 }
