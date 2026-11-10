@@ -177,6 +177,11 @@ Defined as Tailwind animations in `globals.css`:
 Keep durations between 150 and 300ms for interactions. `prefers-reduced-motion` disables
 motion globally, so don't work around it.
 
+The one-document Account Tracker launch layer is the deliberate exception to the interaction
+duration range. Its 420–720ms entrance/exit motion uses the fixed orange-red notebook-and-pen
+identity (`--launch-*` tokens in `globals.css`) and disappears as soon as the initial hydrated
+route has painted. It must not be reused for route transitions.
+
 ---
 
 ## 8. Primitives (`src/components/ui`)
