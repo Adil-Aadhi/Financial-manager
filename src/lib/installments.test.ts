@@ -7,6 +7,7 @@ import {
   coveredInstallmentCount,
   isPlanSettled,
   expectedInstallmentAmount,
+  installmentProgress,
   installmentDueDate,
   installmentTransactionDescription,
   settledLifecycle,
@@ -242,5 +243,47 @@ describe("payments", () => {
     expect(validatePaymentFields({ ...base, paymentMethod: "cash", accountId: "a", transactionOrigin: null, transactionId: null }, 12)).toMatch(/cannot use an account/);
     expect(validatePaymentFields({ ...base, paymentMethod: "account", accountId: "a", transactionOrigin: "created", transactionId: "t" }, 12)).toBeNull();
     expect(validatePaymentFields({ ...base, installmentNumber: 13, coversThrough: 13, paymentMethod: "cash", accountId: null, transactionOrigin: null, transactionId: null }, 12)).toMatch(/not part/);
+  });
+});
+
+describe("installmentProgress", () => {
+  it("calculates progress for the first installment from plan start_date", () => {
+    const p = plan({ start_date: "2026-01-01", first_due_date: "2026-01-21" });
+    const row = { number: 1, dueDate: "2026-01-21", status: "upcoming" as const };
+    // 20 days total; on Jan 11, 10 days elapsed -> 50%
+    expect(installmentProgress(p, row, "2026-01-11")).toBe(50);
+    // On start date -> 0%
+    expect(installmentProgress(p, row, "2026-01-01")).toBe(0);
+    // Before start date -> 0%
+    expect(installmentProgress(p, row, "2025-12-31")).toBe(0);
+    // On due date -> 100%
+    expect(installmentProgress(p, row, "2026-01-21")).toBe(100);
+    // Overdue -> 100%
+    expect(installmentProgress(p, row, "2026-01-25")).toBe(100);
+  });
+
+  it("calculates progress for subsequent installments from previous installment due date", () => {
+    const p = plan({ start_date: "2026-01-01", first_due_date: "2026-01-05", billing_cycle: "monthly" });
+    // Installment 2: previous due date is 2026-01-05, next due date is 2026-02-05 (31 days)
+    const row = { number: 2, dueDate: "2026-02-05", status: "upcoming" as const };
+    expect(installmentProgress(p, row, "2026-01-05")).toBe(0);
+    // 16 days in (Jan 21): 16 / 31 = 52%
+    expect(installmentProgress(p, row, "2026-01-21")).toBe(52);
+    expect(installmentProgress(p, row, "2026-02-05")).toBe(100);
+  });
+
+  it("returns 100% for paid or closed installments", () => {
+    const p = plan();
+    const paidRow = { number: 1, dueDate: "2026-01-05", status: "paid" as const };
+    const closedRow = { number: 2, dueDate: "2026-02-05", status: "closed" as const };
+    expect(installmentProgress(p, paidRow, "2026-01-01")).toBe(100);
+    expect(installmentProgress(p, closedRow, "2026-01-01")).toBe(100);
+  });
+
+  it("includes progress in upcomingInstallments", () => {
+    const p = plan({ start_date: "2026-01-01", first_due_date: "2026-01-21" });
+    const upcoming = upcomingInstallments([p], [], "2026-01-11");
+    expect(upcoming).toHaveLength(1);
+    expect(upcoming[0].progress).toBe(50);
   });
 });

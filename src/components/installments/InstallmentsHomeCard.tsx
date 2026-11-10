@@ -41,7 +41,7 @@ export function InstallmentsHomeCard({
         <EmptyState icon={<CalendarClock className="h-5 w-5" />} title="Installments need setup" description="Apply the Installments database migration to enable this feature." />
       ) : upcoming.length ? (
         <div className="grid gap-3 lg:grid-cols-3">
-          {upcoming.slice(0, 3).map(({ plan, row, progressLabel }) => (
+          {upcoming.slice(0, 3).map(({ plan, row, progressLabel, progress }) => (
             <Link
               key={plan.id}
               href={`/installments?selected=${plan.id}`}
@@ -65,6 +65,30 @@ export function InstallmentsHomeCard({
                     <span>{row.number}/{plan.installment_count} · {formatInstallmentDate(row.dueDate)}</span>
                     <span className={cn(row.daysUntilDue < 0 && "font-semibold text-danger", row.daysUntilDue === 0 && "font-semibold text-warning")}>{dueLabel(row.daysUntilDue)}</span>
                   </div>
+                  {plan.lifecycle === "active" && (
+                    <div
+                      className="mt-2 h-1.5 overflow-hidden rounded-full bg-line"
+                      role="progressbar"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={progress}
+                      aria-label={`${progress}% of installment cycle elapsed`}
+                    >
+                      <span
+                        className={cn(
+                          "block h-full rounded-full",
+                          row.status === "overdue"
+                            ? "bg-danger"
+                            : row.status === "pending"
+                              ? "bg-warning"
+                              : row.status === "paid" || row.status === "closed"
+                                ? "bg-positive"
+                                : "bg-brand"
+                        )}
+                        style={{ width: `${progress}%` }}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             </Link>
