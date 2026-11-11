@@ -4,6 +4,7 @@ import { ThemeProvider } from "@/components/theme/ThemeProvider";
 import { themeInitScript } from "@/components/theme/theme-script";
 import { accentInitScript } from "@/components/theme/accent";
 import { timeZoneCookieScript } from "@/lib/month";
+import { launchSeenScript } from "@/components/pwa/launchSeen";
 import { OfflineDataProvider } from "@/components/offline/OfflineDataProvider";
 import { ServiceWorkerRegistration } from "@/components/pwa/ServiceWorkerRegistration";
 import { AppLaunchScreen } from "@/components/pwa/AppLaunchScreen";
@@ -62,7 +63,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${geistSans.variable} ${geistMono.variable} ${manrope.variable} h-full antialiased`}
     >
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeInitScript + ";" + accentInitScript + ";" + timeZoneCookieScript }} />
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript + ";" + accentInitScript + ";" + timeZoneCookieScript + ";" + launchSeenScript }} />
       </head>
       <body className="min-h-full flex flex-col">
         <AppLaunchScreen />

@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BrandMark } from "@/components/auth/BrandLogo";
+import { hasSeenLaunch, markLaunchSeen } from "./launchSeen";
 
 const MINIMUM_VISIBLE_MS = 420;
 const EXIT_DURATION_MS = 420;
@@ -44,8 +45,19 @@ function waitForPaint() {
  */
 export function AppLaunchScreen() {
   const [phase, setPhase] = useState<LaunchPhase>("visible");
+  const showRef = useRef<boolean | null>(null);
 
   useEffect(() => {
+    // The ref survives Strict Mode's double effect run, so only the first decision counts.
+    if (showRef.current === null) {
+      showRef.current = !hasSeenLaunch();
+      if (showRef.current) markLaunchSeen();
+    }
+    if (!showRef.current) {
+      setPhase("hidden");
+      return;
+    }
+
     const mountedAt = performance.now();
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     let minimumTimer: number | undefined;
