@@ -1,3 +1,4 @@
+// v7: brand logo (.webp under /assets/) is now served cache-first so it renders offline.
 // v6: route warming is single-flight, bounded, and avoids duplicate private asset copies.
 // The private cache keeps its name on purpose: its contents are unchanged, and renaming it
 // would make activate() delete every route saved for offline use.
@@ -229,7 +230,8 @@ self.addEventListener("fetch", (event) => {
   if (
     url.pathname.startsWith("/_next/static/") ||
     url.pathname.startsWith("/icons/") ||
-    /\.(?:css|js|woff2|png|svg)$/.test(url.pathname)
+    url.pathname.startsWith("/assets/") ||
+    /\.(?:css|js|woff2|png|svg|webp|ico)$/.test(url.pathname)
   ) {
     const cacheWork = { promise: Promise.resolve() };
     const response = cacheFirst(request, cacheWork);
