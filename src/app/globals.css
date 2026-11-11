@@ -393,6 +393,11 @@
   transition: opacity 420ms ease, visibility 420ms step-end;
 }
 
+/* Set by the inline script in layout.tsx before first paint when this launch already showed it. */
+html[data-launch-seen="1"] .app-launch-screen {
+  display: none;
+}
+
 .app-launch-screen[data-phase="leaving"] {
   pointer-events: none;
   opacity: 0;
