@@ -2,6 +2,7 @@ import {
   BarChart3,
   CalendarClock,
   FileClock,
+  HandCoins,
   Home,
   ReceiptText,
   Repeat2,
@@ -29,6 +30,7 @@ export const DESKTOP_NAV_ITEMS: NavItem[] = [
 
 /** Items inside the desktop "More" menu (lg+). */
 export const DESKTOP_MORE_NAV_ITEMS: NavItem[] = [
+  { label: "Personal Ledger", href: "/ledger", icon: HandCoins },
   { label: "Categories", href: "/categories", icon: Tags },
   { label: "Trash", href: "/trash", icon: Trash2 },
   { label: "Settings", href: "/settings", icon: Settings },
@@ -51,6 +53,7 @@ export const MORE_NAV_ITEMS: NavItem[] = [
   { label: "Subscriptions", href: "/subscriptions", icon: Repeat2 },
   { label: "Bills", href: "/bills", icon: FileClock },
   { label: "Installments", href: "/installments", icon: CalendarClock },
+  { label: "Personal Ledger", href: "/ledger", icon: HandCoins },
   { label: "Settings", href: "/settings", icon: Settings },
   { label: "Trash", href: "/trash", icon: Trash2 },
 ];

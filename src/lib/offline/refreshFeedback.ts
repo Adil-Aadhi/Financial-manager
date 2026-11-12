@@ -11,7 +11,8 @@ export type RefreshScope =
   | "daily-budget"
   | "bills"
   | "subscriptions"
-  | "installments";
+  | "installments"
+  | "ledger";
 
 const active = new Map<number, ReadonlySet<RefreshScope>>();
 const listeners = new Set<() => void>();

@@ -8,6 +8,8 @@ import { offlineDb, type OutboxEntry } from "@/lib/offline/db";
 import { describeChange } from "@/lib/offline/describeChange";
 import { OUTBOX_CHANGED_EVENT } from "@/lib/offline/events";
 import { selectRunnableEntries } from "@/lib/offline/queuePolicy";
+import { isLedgerEntity } from "@/lib/ledger";
+import { ledgerTableFor, ledgerTableList } from "@/lib/offline/ledgerTables";
 import { SYNC_BATCH_SIZE, type SyncBatchResponse, type SyncOperation, type SyncOpResult } from "@/lib/sync/types";
 import { normalizeTransactionDate } from "@/lib/transactions";
 
@@ -277,6 +279,7 @@ async function settle(batch: OutboxEntry[], results: SyncOpResult[]) {
     offlineDb.billPayments,
     offlineDb.installmentPlans,
     offlineDb.installmentPayments,
+    ...ledgerTableList(),
   ];
   await offlineDb.transaction("rw", tables, async () => {
     for (const entry of batch) {
@@ -400,6 +403,9 @@ async function recordServerVersion(entry: OutboxEntry, serverUpdatedAt: string) 
         await offlineDb.transactions.update([entry.ownerId, entry.payload.transaction_id], { updated_at: serverUpdatedAt });
       }
     }
+  } else if (isLedgerEntity(entry.entity)) {
+    // Ledger rows keep their own timestamps; an expense's shares were written with the same one.
+    await ledgerTableFor(entry.entity).update([entry.ownerId, entry.entityId], { updated_at: serverUpdatedAt });
   }
   // Categories have no updated_at.
 }

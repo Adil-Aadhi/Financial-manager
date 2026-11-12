@@ -42,6 +42,8 @@ import {
   type InstallmentPlanInput,
   type InstallmentTransactionOrigin,
 } from "@/lib/installments";
+import { LEDGER_ENTITIES } from "@/lib/ledger";
+import { applyLedgerOperation } from "@/lib/server/ledgerSyncApply";
 import type { createClient } from "@/lib/supabase/server";
 import {
   addBillingCycle,
@@ -143,7 +145,7 @@ function isOperationShape(op: SyncOperation) {
     !!op &&
     typeof op.opId === "string" &&
     typeof op.ownerId === "string" &&
-    ["transaction", "account", "category", "budget", "daily_expense", "daily_limit", "subscription", "subscription_payment", "bill", "bill_payment", "installment_plan", "installment_payment"].includes(op.entity) &&
+    ["transaction", "account", "category", "budget", "daily_expense", "daily_limit", "subscription", "subscription_payment", "bill", "bill_payment", "installment_plan", "installment_payment", ...LEDGER_ENTITIES].includes(op.entity) &&
     ["CREATE", "UPDATE", "DELETE"].includes(op.op) &&
     typeof op.entityId === "string" &&
     (op.entity === "budget"
@@ -244,6 +246,16 @@ async function applyOne(supabase: ServerClient, userId: string, op: SyncOperatio
       return applyInstallmentPlan(supabase, userId, op, editedAt);
     case "installment_payment":
       return applyInstallmentPayment(supabase, userId, op, editedAt);
+    case "ledger_person":
+    case "ledger_group":
+    case "ledger_member":
+    case "ledger_rate":
+    case "ledger_span":
+    case "ledger_expense":
+    case "ledger_obligation":
+    case "ledger_payment":
+      // Personal Ledger: isolated from every table above (see ledgerSyncApply.ts).
+      return applyLedgerOperation(supabase, userId, op, editedAt, { done, already, rejected, fromDbError, lastWriteWins, loadOwnRow });
   }
 }
 

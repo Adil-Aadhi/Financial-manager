@@ -14,6 +14,8 @@ import type {
   OutboxEntry,
 } from "./db";
 import { isAmbiguousLegacyTransactionDateUpdate, normalizeTransactionDate } from "@/lib/transactions";
+import { isLedgerEntity } from "@/lib/ledger";
+import { EMPTY_LEDGER_LOCAL_ROWS, overlayLedger, type LedgerLocalRows, type LedgerOverlayEntry } from "./ledgerOverlay";
 
 export interface LocalSnapshotRows {
   accounts: LocalAccount[];
@@ -29,6 +31,8 @@ export interface LocalSnapshotRows {
   billPayments?: LocalBillPayment[];
   installmentPlans?: LocalInstallmentPlan[];
   installmentPayments?: LocalInstallmentPayment[];
+  /** Personal Ledger rows (isolated from everything above). */
+  ledger?: LedgerLocalRows;
 }
 
 /**
@@ -98,8 +102,16 @@ export function overlayOutbox(
     }
   };
 
+  const ledgerEntries: LedgerOverlayEntry[] = [];
+
   for (const entry of [...entries].sort((left, right) => (left.seq ?? 0) - (right.seq ?? 0))) {
     if (entry.ownerId !== ownerId) continue;
+
+    if (isLedgerEntity(entry.entity)) {
+      // Personal Ledger changes touch only ledger tables; replayed together below, in order.
+      ledgerEntries.push(entry);
+      continue;
+    }
 
     if (entry.entity === "account") {
       if (entry.op === "DELETE") {
@@ -350,5 +362,6 @@ export function overlayOutbox(
     billPayments: [...billPayments.values()],
     installmentPlans: [...installmentPlans.values()],
     installmentPayments: [...installmentPayments.values()],
+    ledger: overlayLedger(ownerId, server.ledger ?? EMPTY_LEDGER_LOCAL_ROWS, previous.ledger ?? EMPTY_LEDGER_LOCAL_ROWS, ledgerEntries),
   };
 }

@@ -1,6 +1,9 @@
+import { ledgerDependsOn } from "@/lib/offline/ledgerQueue";
+import type { LedgerEntity } from "@/lib/ledger";
+
 export interface QueuePolicyEntry {
   seq?: number;
-  entity: "transaction" | "account" | "category" | "budget" | "daily_expense" | "daily_limit" | "subscription" | "subscription_payment" | "bill" | "bill_payment" | "installment_plan" | "installment_payment";
+  entity: "transaction" | "account" | "category" | "budget" | "daily_expense" | "daily_limit" | "subscription" | "subscription_payment" | "bill" | "bill_payment" | "installment_plan" | "installment_payment" | LedgerEntity;
   entityId: string;
   op: "CREATE" | "UPDATE" | "DELETE";
   payload: Record<string, unknown>;
@@ -88,6 +91,9 @@ export function dependsOn(entry: QueuePolicyEntry, earlier: QueuePolicyEntry) {
     return true;
   }
   if (entry.entity === "bill" && entry.op === "DELETE" && earlier.entity === "bill_payment" && references(earlier.payload, "bill_id", entry.entityId)) return true;
+
+  // Personal Ledger: isolated records that depend only on each other (see ledgerQueue.ts).
+  if (ledgerDependsOn(entry, earlier)) return true;
 
   return false;
 }

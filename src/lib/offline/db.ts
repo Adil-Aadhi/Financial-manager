@@ -5,6 +5,8 @@ import type { AccountGroup } from "@/lib/accounts";
 import type { BillAmountType, BillCategory, BillCycle, BillIconName, BillLifecycle } from "@/lib/bills";
 import type { InstallmentPaymentRecord, InstallmentPlanRecord } from "@/lib/installments";
 import type { BillingCycle, SubscriptionIconName, SubscriptionLifecycle } from "@/lib/subscriptions";
+import type { LedgerEntity } from "@/lib/ledger";
+import type { LedgerLocalRows } from "@/lib/offline/ledgerOverlay";
 import type { SyncReviewReason, TransactionDateIntent } from "@/lib/sync/types";
 
 export interface LocalProfile {
@@ -165,6 +167,16 @@ export interface LocalBillPayment {
 export type LocalInstallmentPlan = InstallmentPlanRecord & { ownerId: string };
 export type LocalInstallmentPayment = InstallmentPaymentRecord & { ownerId: string };
 
+/** Personal Ledger rows: the server columns plus the device owner. Isolated from every other table. */
+export type LocalLedgerPerson = LedgerLocalRows["people"][number];
+export type LocalLedgerGroup = LedgerLocalRows["groups"][number];
+export type LocalLedgerMember = LedgerLocalRows["members"][number];
+export type LocalLedgerRate = LedgerLocalRows["rates"][number];
+export type LocalLedgerSpan = LedgerLocalRows["spans"][number];
+export type LocalLedgerExpense = LedgerLocalRows["expenses"][number];
+export type LocalLedgerObligation = LedgerLocalRows["obligations"][number];
+export type LocalLedgerPayment = LedgerLocalRows["payments"][number];
+
 export interface LocalVerificationTotals {
   accounts: number;
   transactions: number;
@@ -187,6 +199,8 @@ export interface LocalSyncMeta {
   billsAvailable?: boolean;
   /** Missing until a snapshot from an Installments-aware client has completed. */
   installmentsAvailable?: boolean;
+  /** Missing until a snapshot from a Personal Ledger-aware client has completed. */
+  ledgerAvailable?: boolean;
   server: LocalVerificationTotals;
   local: LocalVerificationTotals;
   totalsMatch: boolean;
@@ -204,7 +218,8 @@ export type OutboxEntity =
   | "bill"
   | "bill_payment"
   | "installment_plan"
-  | "installment_payment";
+  | "installment_payment"
+  | LedgerEntity;
 export type OutboxOperation = "CREATE" | "UPDATE" | "DELETE";
 /** Phase 1 only writes "pending". Phase 2's sync engine moves ops through the others. */
 export type OutboxStatus = "pending" | "syncing" | "failed";
@@ -272,6 +287,14 @@ class FinanceOfflineDatabase extends Dexie {
   billPayments!: Table<LocalBillPayment, [string, string]>;
   installmentPlans!: Table<LocalInstallmentPlan, [string, string]>;
   installmentPayments!: Table<LocalInstallmentPayment, [string, string]>;
+  ledgerPeople!: Table<LocalLedgerPerson, [string, string]>;
+  ledgerGroups!: Table<LocalLedgerGroup, [string, string]>;
+  ledgerMembers!: Table<LocalLedgerMember, [string, string]>;
+  ledgerRates!: Table<LocalLedgerRate, [string, string]>;
+  ledgerSpans!: Table<LocalLedgerSpan, [string, string]>;
+  ledgerExpenses!: Table<LocalLedgerExpense, [string, string]>;
+  ledgerObligations!: Table<LocalLedgerObligation, [string, string]>;
+  ledgerPayments!: Table<LocalLedgerPayment, [string, string]>;
   syncMeta!: EntityTable<LocalSyncMeta, "ownerId">;
   outbox!: EntityTable<OutboxEntry, "seq">;
   syncConflicts!: EntityTable<SyncConflictRecord, "id">;
@@ -315,6 +338,17 @@ class FinanceOfflineDatabase extends Dexie {
       installmentPlans: "&[ownerId+id], ownerId, [ownerId+lifecycle]",
       installmentPayments:
         "&[ownerId+id], ownerId, [ownerId+installment_plan_id], [ownerId+installment_plan_id+installment_number], [ownerId+transaction_id]",
+    });
+    // v8 adds only the isolated Personal Ledger tables; every existing table is unchanged.
+    this.version(8).stores({
+      ledgerPeople: "&[ownerId+id], ownerId",
+      ledgerGroups: "&[ownerId+id], ownerId",
+      ledgerMembers: "&[ownerId+id], ownerId, [ownerId+group_id], [ownerId+person_id]",
+      ledgerRates: "&[ownerId+id], ownerId, [ownerId+member_id]",
+      ledgerSpans: "&[ownerId+id], ownerId, [ownerId+member_id]",
+      ledgerExpenses: "&[ownerId+id], ownerId",
+      ledgerObligations: "&[ownerId+id], ownerId, [ownerId+person_id], [ownerId+member_id], [ownerId+expense_id]",
+      ledgerPayments: "&[ownerId+id], ownerId, [ownerId+obligation_id]",
     });
   }
 }
