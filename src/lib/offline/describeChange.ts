@@ -89,5 +89,42 @@ export async function describeChange(entry: OutboxEntry): Promise<string> {
       const amount = amountText(payload.actual_amount);
       return `${entry.op === "UPDATE" ? "Edited" : "Recorded"} installment${number} payment${amount ? ` · ${amount}` : ""}`;
     }
+    case "ledger_person": {
+      const stored = await offlineDb.ledgerPeople.get([entry.ownerId, entry.entityId]);
+      const name = String(payload.name ?? stored?.name ?? "a person");
+      if (entry.op === "DELETE") return `Deleted ${name} from the ledger`;
+      if (payload.archived_at) return `Archived ${name} in the ledger`;
+      return `${entry.op === "CREATE" ? "Added" : "Edited"} ${name} in the ledger`;
+    }
+    case "ledger_group": {
+      const stored = await offlineDb.ledgerGroups.get([entry.ownerId, entry.entityId]);
+      const name = String(payload.name ?? stored?.name ?? "a group");
+      if (entry.op === "DELETE") return `Deleted recurring group “${name}”`;
+      return `${entry.op === "CREATE" ? "Added" : "Edited"} recurring group “${name}”`;
+    }
+    case "ledger_member":
+      return entry.op === "DELETE" ? "Removed a group member" : "Added a group member";
+    case "ledger_rate":
+      return `Set a member's contribution to ${amountText(payload.amount)}`;
+    case "ledger_span":
+      return payload.to_date ? `Member ${payload.end_reason === "left" ? "left" : "paused"} a group` : "Member joined a group again";
+    case "ledger_expense": {
+      const stored = await offlineDb.ledgerExpenses.get([entry.ownerId, entry.entityId]);
+      const title = String(payload.title ?? stored?.title ?? "an expense");
+      if (entry.op === "DELETE") return `Deleted shared expense “${title}”`;
+      return `${entry.op === "CREATE" ? "Added" : "Edited"} shared expense “${title}”`;
+    }
+    case "ledger_obligation": {
+      const stored = await offlineDb.ledgerObligations.get([entry.ownerId, entry.entityId]);
+      const title = String(payload.title ?? stored?.title ?? "a due");
+      if (entry.op === "DELETE") return `Deleted due “${title}”`;
+      if (payload.source === "recurring") return `Generated recurring due “${title}”`;
+      return `${entry.op === "CREATE" ? "Added" : "Edited"} due “${title}”`;
+    }
+    case "ledger_payment": {
+      const amount = amountText(payload.amount);
+      if (payload.voided_at) return `Voided a ledger payment${amount ? ` · ${amount}` : ""}`;
+      return `${entry.op === "UPDATE" ? "Edited" : "Recorded"} ledger payment${amount ? ` · ${amount}` : ""}`;
+    }
   }
 }

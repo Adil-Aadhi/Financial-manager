@@ -1,6 +1,9 @@
+import type { LedgerEntity } from "@/lib/ledger";
+
 /** Wire types shared by the client sync engine and the sync Server Action. */
 
 export type SyncEntity =
+  | LedgerEntity
   | "transaction"
   | "account"
   | "category"

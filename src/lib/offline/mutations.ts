@@ -184,7 +184,7 @@ export async function runMutation<R extends { success: boolean; error?: string }
   }
 }
 
-async function requireLocalSnapshot(ownerId: string) {
+export async function requireLocalSnapshot(ownerId: string) {
   const meta = await offlineDb.syncMeta.get(ownerId);
   if (!meta?.totalsMatch) {
     throw new LocalMutationError(
@@ -194,7 +194,7 @@ async function requireLocalSnapshot(ownerId: string) {
 }
 
 /** Adds an operation to the outbox, merging it with this record's queued operations when safe. */
-async function enqueue(
+export async function enqueue(
   ownerId: string,
   entity: OutboxEntity,
   entityId: string,

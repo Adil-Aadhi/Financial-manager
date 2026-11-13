@@ -1,6 +1,7 @@
 import "client-only";
 
 import { offlineDb } from "@/lib/offline/db";
+import { ledgerTableList } from "@/lib/offline/ledgerTables";
 
 const PRIVATE_CACHE_CLEAR_TIMEOUT_MS = 5_000;
 const PRIVATE_CACHE_NAME = "account-tracker-private-v1";
@@ -67,6 +68,7 @@ export async function removeLocalOwnerData(ownerId: string) {
       offlineDb.billPayments,
       offlineDb.installmentPlans,
       offlineDb.installmentPayments,
+      ...ledgerTableList(),
       offlineDb.syncMeta,
       offlineDb.outbox,
       offlineDb.syncConflicts,
@@ -86,6 +88,7 @@ export async function removeLocalOwnerData(ownerId: string) {
         offlineDb.billPayments.where("ownerId").equals(ownerId).delete(),
         offlineDb.installmentPlans.where("ownerId").equals(ownerId).delete(),
         offlineDb.installmentPayments.where("ownerId").equals(ownerId).delete(),
+        ...ledgerTableList().map((table) => table.where("ownerId").equals(ownerId).delete()),
         offlineDb.syncMeta.delete(ownerId),
         offlineDb.outbox.where("ownerId").equals(ownerId).delete(),
         offlineDb.syncConflicts.where("ownerId").equals(ownerId).delete(),

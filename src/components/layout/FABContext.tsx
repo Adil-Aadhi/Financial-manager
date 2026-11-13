@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { AddAccountModal } from "@/components/accounts/AddAccountModal";
 import { QuickTransactionModal } from "@/components/transactions/QuickTransactionModal";
 import { AddCategoryModal } from "@/components/categories/CategoryModals";
+import { LEDGER_ADD_EVENT } from "@/lib/ledger";
 
 export interface AccountContextData {
   id?: string;
@@ -18,7 +19,7 @@ interface FABContextType {
   openQuickTransaction: (account?: AccountContextData) => void;
   activeAccount: AccountContextData | null;
   setActiveAccount: (account: AccountContextData | null) => void;
-  actionType: "quick-transaction" | "add-category";
+  actionType: "quick-transaction" | "add-category" | "ledger-add";
   fabLabel: string;
   fabTooltip: string;
 }
@@ -38,27 +39,36 @@ export function FABProvider({ children }: { children: React.ReactNode }) {
   const isTransactionsPage = pathname === "/transactions" || pathname.startsWith("/transactions/");
   const isCategoriesPage = pathname === "/categories" || pathname.startsWith("/categories/");
 
-  const actionType: "quick-transaction" | "add-category" = useMemo(() => {
+  // The Personal Ledger is separate from accounts and transactions: on its pages the button adds
+  // to the ledger. The ledger's own host (LedgerAddHost) listens for this event and opens its chooser.
+  const isLedgerPage = pathname === "/ledger" || pathname.startsWith("/ledger/");
+
+  const actionType: "quick-transaction" | "add-category" | "ledger-add" = useMemo(() => {
+    if (isLedgerPage) return "ledger-add";
     if (isCategoriesPage) return "add-category";
     if (isAccountDetailsPage) return "quick-transaction";
     if (isTransactionsPage) return "quick-transaction";
     return "quick-transaction";
-  }, [isAccountDetailsPage, isCategoriesPage, isTransactionsPage]);
+  }, [isAccountDetailsPage, isCategoriesPage, isLedgerPage, isTransactionsPage]);
 
   const fabLabel = useMemo(() => {
+    if (actionType === "ledger-add") return "Add to Ledger";
     if (actionType === "add-category") return "Add Category";
     if (actionType === "quick-transaction") return "New Transaction";
     return "New";
   }, [actionType]);
 
   const fabTooltip = useMemo(() => {
+    if (actionType === "ledger-add") return "Add a due, shared expense, group, person or payment";
     if (actionType === "add-category") return "Open Add Category modal";
     if (actionType === "quick-transaction") return "Open Add Transaction form";
     return "Action";
   }, [actionType]);
 
   const triggerAction = useCallback(() => {
-    if (actionType === "add-category") {
+    if (actionType === "ledger-add") {
+      window.dispatchEvent(new Event(LEDGER_ADD_EVENT));
+    } else if (actionType === "add-category") {
       setIsAddCategoryOpen(true);
     } else {
       setIsQuickTransactionOpen(true);

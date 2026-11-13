@@ -16,6 +16,7 @@ export async function updateSession(request: NextRequest) {
     "/subscriptions",
     "/bills",
     "/installments",
+    "/ledger",
     "/daily-budget",
   ];
   const isProtectedRoute = protectedRoutes.some(

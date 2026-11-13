@@ -12,6 +12,8 @@ import {
   type RefreshScope,
 } from "@/lib/offline/refreshFeedback";
 import { overlayOutbox } from "@/lib/offline/snapshotOverlay";
+import { LEDGER_COLUMNS, LEDGER_OBLIGATION_LEGACY_COLUMNS, type LedgerRows } from "@/lib/ledger";
+import { ledgerTableList, readLedgerRows, replaceLedgerRows } from "@/lib/offline/ledgerTables";
 import { createClient } from "@/lib/supabase/client";
 import type { SubscriptionIconName } from "@/lib/subscriptions";
 import { normalizeTransactionDate } from "@/lib/transactions";
@@ -392,7 +394,49 @@ async function downloadSnapshot(user: User) {
     }
   );
 
-  const [profileResult, accounts, categories, budget, dailyBudget, subscriptions, bills, installments] = await Promise.all([
+  // Personal Ledger. Before its migration the tables don't exist: the feature is then reported
+  // unavailable and everything else downloads as before.
+  const isMissingLedgerTable = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    return [...MISSING_OBJECT_CODES].some((code) => message.includes(code)) || message.includes("ledger_");
+  };
+  const ledgerTable = <T,>(table: keyof typeof LEDGER_COLUMNS, label: string, columnsOverride?: string) => {
+    const name: string = table;
+    const columns: string = columnsOverride ?? LEDGER_COLUMNS[table];
+    return fetchEveryPage<T>(label, (from, to) =>
+      supabase.from(name).select(columns).eq("user_id", user.id).order("id").range(from, to) as unknown as PromiseLike<PageResult<T>>
+    );
+  };
+  // Dues carry an "origin" once the follow-up ledger migration is applied; until then read without it.
+  const ledgerObligations = () =>
+    ledgerTable<LedgerRows["obligations"][number]>("ledger_obligations", "Ledger dues").catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.includes("origin")) throw error;
+      return ledgerTable<LedgerRows["obligations"][number]>("ledger_obligations", "Ledger dues", LEDGER_OBLIGATION_LEGACY_COLUMNS);
+    });
+  const ledgerPromise = Promise.all([
+    ledgerTable<LedgerRows["people"][number]>("ledger_people", "Ledger people"),
+    ledgerTable<LedgerRows["groups"][number]>("ledger_groups", "Ledger groups"),
+    ledgerTable<LedgerRows["members"][number]>("ledger_members", "Ledger members"),
+    ledgerTable<LedgerRows["rates"][number]>("ledger_member_rates", "Ledger rates"),
+    ledgerTable<LedgerRows["spans"][number]>("ledger_member_spans", "Ledger spans"),
+    ledgerTable<LedgerRows["expenses"][number]>("ledger_expenses", "Ledger expenses"),
+    ledgerObligations(),
+    ledgerTable<LedgerRows["payments"][number]>("ledger_payments", "Ledger payments"),
+  ]).then(
+    ([people, groups, members, rates, spans, expenses, obligations, payments]): { rows: LedgerRows; available: boolean } => ({
+      rows: { people, groups, members, rates, spans, expenses, obligations, payments },
+      available: true,
+    }),
+    (error: unknown): { rows: LedgerRows; available: boolean } => {
+      if (isMissingLedgerTable(error)) {
+        return { rows: { people: [], groups: [], members: [], rates: [], spans: [], expenses: [], obligations: [], payments: [] }, available: false };
+      }
+      throw error;
+    }
+  );
+
+  const [profileResult, accounts, categories, budget, dailyBudget, subscriptions, bills, installments, ledger] = await Promise.all([
     profilePromise,
     accountsPromise,
     categoriesPromise,
@@ -401,6 +445,7 @@ async function downloadSnapshot(user: User) {
     subscriptionsPromise,
     billsPromise,
     installmentsPromise,
+    ledgerPromise,
   ]);
   if (profileResult.error) throw new Error(`Profile: ${profileResult.error.message}`);
 
@@ -429,7 +474,7 @@ async function downloadSnapshot(user: User) {
     default_currency: "USD",
   };
 
-  return { profile, accounts, categories, transactions, budget, dailyBudget, subscriptions, bills, installments };
+  return { profile, accounts, categories, transactions, budget, dailyBudget, subscriptions, bills, installments, ledger };
 }
 
 async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof downloadSnapshot>>) {
@@ -452,6 +497,7 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
       offlineDb.billPayments,
       offlineDb.installmentPlans,
       offlineDb.installmentPayments,
+      ...ledgerTableList(),
       offlineDb.syncMeta,
       offlineDb.outbox,
     ],
@@ -472,6 +518,7 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
         previousBillPayments,
         previousInstallmentPlans,
         previousInstallmentPayments,
+        previousLedger,
         outbox,
       ] = await Promise.all([
         offlineDb.accounts.where("ownerId").equals(ownerId).toArray(),
@@ -486,6 +533,7 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
         offlineDb.billPayments.where("ownerId").equals(ownerId).toArray(),
         offlineDb.installmentPlans.where("ownerId").equals(ownerId).toArray(),
         offlineDb.installmentPayments.where("ownerId").equals(ownerId).toArray(),
+        readLedgerRows(ownerId),
         offlineDb.outbox.where("ownerId").equals(ownerId).sortBy("seq"),
       ]);
 
@@ -519,6 +567,16 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
           billPayments: snapshot.bills.payments.map((payment) => ({ ownerId, ...payment })),
           installmentPlans: snapshot.installments.plans.map((plan) => ({ ownerId, ...plan })),
           installmentPayments: snapshot.installments.payments.map((payment) => ({ ownerId, ...payment })),
+          ledger: {
+            people: snapshot.ledger.rows.people.map((row) => ({ ownerId, ...row })),
+            groups: snapshot.ledger.rows.groups.map((row) => ({ ownerId, ...row })),
+            members: snapshot.ledger.rows.members.map((row) => ({ ownerId, ...row })),
+            rates: snapshot.ledger.rows.rates.map((row) => ({ ownerId, ...row })),
+            spans: snapshot.ledger.rows.spans.map((row) => ({ ownerId, ...row })),
+            expenses: snapshot.ledger.rows.expenses.map((row) => ({ ownerId, ...row })),
+            obligations: snapshot.ledger.rows.obligations.map((row) => ({ ownerId, ...row })),
+            payments: snapshot.ledger.rows.payments.map((row) => ({ ownerId, ...row })),
+          },
         },
         {
           accounts: previousAccounts,
@@ -533,6 +591,7 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
           billPayments: previousBillPayments,
           installmentPlans: previousInstallmentPlans,
           installmentPayments: previousInstallmentPayments,
+          ledger: previousLedger,
         },
         outbox
       );
@@ -577,6 +636,7 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
       await offlineDb.billPayments.bulkPut(localRows.billPayments ?? []);
       await offlineDb.installmentPlans.bulkPut(localRows.installmentPlans ?? []);
       await offlineDb.installmentPayments.bulkPut(localRows.installmentPayments ?? []);
+      if (localRows.ledger) await replaceLedgerRows(ownerId, localRows.ledger);
 
       const [localAccounts, localTransactions] = await Promise.all([
         offlineDb.accounts.where("ownerId").equals(ownerId).toArray(),
@@ -597,6 +657,7 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
         subscriptionsAvailable: snapshot.subscriptions.available,
         billsAvailable: snapshot.bills.available,
         installmentsAvailable: snapshot.installments.available,
+        ledgerAvailable: snapshot.ledger.available,
         server: serverTotals,
         local: localTotals,
         totalsMatch,

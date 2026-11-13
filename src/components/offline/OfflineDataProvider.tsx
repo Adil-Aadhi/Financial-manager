@@ -9,23 +9,13 @@ import { getActiveOwnerId, setActiveOwnerId } from "@/lib/offline/activeOwner";
 import { clearPrivateRouteCache } from "@/lib/offline/privacy";
 import { shouldIsolateOwner } from "@/lib/offline/signOutCoordinator";
 import { requestSync, startSyncEngine } from "@/lib/offline/sync";
+// The startup warm list (unchanged from before the Personal Ledger; ledger pages are warmed on demand).
+import { FIXED_OFFLINE_ROUTES } from "@/lib/offline/warmRoutes";
 
 // Keep this in sync with public/sw.js. A new worker version gets one fresh route-warm
 // signature without permanently disabling future warming.
 const ROUTE_WARM_VERSION = "account-tracker-shell-v2";
 const ROUTE_WARM_DELAY_MS = 2_000;
-const FIXED_OFFLINE_ROUTES = [
-  "/home",
-  "/transactions",
-  "/categories",
-  "/trash",
-  "/reports",
-  "/settings",
-  "/daily-budget",
-  "/subscriptions",
-  "/bills",
-  "/installments",
-] as const;
 
 export function OfflineDataProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
