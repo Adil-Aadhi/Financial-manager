@@ -8,6 +8,7 @@ import { getReportSource } from "@/lib/supabase/reports";
 import { TRANSACTION_CALENDAR_TIME_ZONE } from "@/lib/month";
 import { buildReport, getReportRange } from "@/lib/reports";
 import { PageHeader } from "@/components/layout/AppShell";
+import { ExportReportButton } from "@/components/reports/ExportReportButton";
 import { OfflineReportContent } from "@/components/reports/OfflineReportContent";
 import { ReportsSkeleton } from "@/components/reports/ReportsSkeleton";
 
@@ -28,7 +29,11 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
 
   return (
     <>
-      <PageHeader title="Reports" description="Income, spending and savings for any period." />
+      <PageHeader
+        title="Reports"
+        description="Income, spending and savings for any period."
+        action={<ExportReportButton ownerId={user.id} defaultCurrency={profile.default_currency} />}
+      />
       <Suspense fallback={<ReportsSkeleton />}>
         <ReportContent
           userId={user.id}
