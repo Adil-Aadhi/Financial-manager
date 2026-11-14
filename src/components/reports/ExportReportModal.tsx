@@ -14,7 +14,7 @@ import { normalizeIncludeInSummary } from "@/lib/accountSummary";
 import { offlineDb } from "@/lib/offline/db";
 import { useActiveOwnerId } from "@/lib/offline/activeOwner";
 import { useOnlineStatus } from "@/lib/offline/useOnlineStatus";
-import { canShareFile, downloadBlob, shareBlob } from "@/lib/reportExport/download";
+import { canShareFile, downloadBlob, shareBlob, shouldUseShareSheet } from "@/lib/reportExport/download";
 import { formatDisplayDate, formatGeneratedAt } from "@/lib/reportExport/format";
 import type { AccountMode, DataSourceKind, ExportFormat } from "@/lib/reportExport/model";
 import {
@@ -60,7 +60,8 @@ interface PickerAccount {
 type Status =
   | { kind: "idle" }
   | { kind: "running"; message: string }
-  | { kind: "done"; result: ExportResult }
+  /** viaShare: iOS, where the file is saved through the share sheet on the user's next tap. */
+  | { kind: "done"; result: ExportResult; viaShare: boolean; shareError?: string }
   | { kind: "error"; message: string; problems?: string[]; offlineFallback?: boolean };
 
 function chipClass(active: boolean) {
@@ -223,8 +224,12 @@ export function ExportReportModal({
         },
       });
       if (runId.current !== id) return;
-      downloadBlob(result.blob, result.filename);
-      setStatus({ kind: "done", result });
+      // iOS can't save a generated file as a download (it opens it full-screen, with no way
+      // back inside the installed app), and the share sheet needs a fresh tap after the async
+      // work, so iOS gets a "Save to Files / Share" button instead of an automatic download.
+      const viaShare = shouldUseShareSheet(result.blob, result.filename);
+      if (!viaShare) downloadBlob(result.blob, result.filename);
+      setStatus({ kind: "done", result, viaShare });
     } catch (error) {
       if (runId.current !== id) return;
       if (error instanceof OfflineExportUnavailableError) {
@@ -247,7 +252,20 @@ export function ExportReportModal({
   };
 
   const doneResult = status.kind === "done" ? status.result : null;
+  const viaShare = status.kind === "done" && status.viaShare;
+  const shareError = status.kind === "done" ? status.shareError : undefined;
   const shareable = doneResult ? canShareFile(doneResult.blob, doneResult.filename) : false;
+
+  const shareResult = async () => {
+    if (status.kind !== "done") return;
+    const current = status;
+    try {
+      await shareBlob(current.result.blob, current.result.filename);
+      setStatus({ ...current, shareError: undefined });
+    } catch {
+      setStatus({ ...current, shareError: "Couldn't open the share sheet. Tap the button again." });
+    }
+  };
 
   return (
     <Modal isOpen={isOpen} onClose={close} title="Export report" description="Download a statement for any period and account." size="lg">
@@ -486,25 +504,41 @@ export function ExportReportModal({
 
         {doneResult && (
           <Alert variant="success" title="Report ready">
-            <p className="break-all">{doneResult.filename} has been downloaded.</p>
+            <p className="break-all">
+              {viaShare
+                ? `${doneResult.filename} is ready. Tap Save to Files / Share to keep it.`
+                : `${doneResult.filename} has been downloaded.`}
+            </p>
             {doneResult.report.notes.slice(1).map((note) => (
               <p key={note} className="mt-0.5">{note}</p>
             ))}
-            <div className="mt-2 flex flex-wrap gap-2">
-              <Button size="sm" variant="secondary" onClick={() => downloadBlob(doneResult.blob, doneResult.filename)}>
-                Download again
+            {shareError && <p className="mt-1 font-medium text-danger">{shareError}</p>}
+            {viaShare ? (
+              <Button
+                size="lg"
+                className="mt-3 w-full"
+                leftIcon={<Share2 className="h-4 w-4" />}
+                onClick={() => void shareResult()}
+              >
+                Save to Files / Share
               </Button>
-              {shareable && (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  leftIcon={<Share2 className="h-3.5 w-3.5" />}
-                  onClick={() => void shareBlob(doneResult.blob, doneResult.filename).catch(() => undefined)}
-                >
-                  Share / Save to Files
+            ) : (
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button size="sm" variant="secondary" onClick={() => downloadBlob(doneResult.blob, doneResult.filename)}>
+                  Download again
                 </Button>
-              )}
-            </div>
+                {shareable && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    leftIcon={<Share2 className="h-3.5 w-3.5" />}
+                    onClick={() => void shareResult()}
+                  >
+                    Share
+                  </Button>
+                )}
+              </div>
+            )}
           </Alert>
         )}
 
