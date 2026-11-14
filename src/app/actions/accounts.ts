@@ -50,6 +50,7 @@ const TEN_DAYS_IN_MS = ACCOUNT_RESTORE_WINDOW_MS;
 
 function revalidateAccountViews(accountId?: string) {
   revalidatePath("/transactions");
+  revalidatePath("/accounts/archived");
   revalidatePath("/home");
   revalidatePath("/reports");
   revalidatePath("/trash");
@@ -256,6 +257,51 @@ export async function restoreAccountAction(
       error: "This account is no longer available for recovery.",
     };
   }
+
+  revalidateAccountViews(accountId);
+  return { success: true };
+}
+
+/**
+ * Archive (hide from Transactions, block new transactions) or unarchive an account. The balance
+ * and history keep counting on Home and Reports. The database stamps archived_at itself.
+ */
+export async function setAccountArchivedAction(
+  accountId: string,
+  archived: boolean
+): Promise<AccountActionResult> {
+  const { supabase, user } = await getAccountActionContext();
+
+  if (!user) {
+    return { success: false, error: "You must be signed in to change an account." };
+  }
+  if (!accountId || typeof archived !== "boolean") {
+    return { success: false, error: "Account not found." };
+  }
+
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("accounts")
+    .update({ archived_at: archived ? now : null, updated_at: now })
+    .eq("id", accountId)
+    .eq("user_id", user.id)
+    .is("deleted_at", null)
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    console.error("Database error changing account archive state:", error.message);
+    return {
+      success: false,
+      error:
+        error.code === "42703" || error.code === "PGRST204"
+          ? "Archiving needs the account-archive database migration."
+          : archived
+            ? "Unable to archive this account."
+            : "Unable to unarchive this account.",
+    };
+  }
+  if (!data) return { success: false, error: "Account not found." };
 
   revalidateAccountViews(accountId);
   return { success: true };

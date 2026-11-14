@@ -2,8 +2,10 @@
 
 import React from "react";
 import { useLiveQuery } from "dexie-react-hooks";
+import Link from "next/link";
 import { ArrowDownLeft, ArrowUpRight, Landmark } from "lucide-react";
 import { TransactionHistory } from "@/components/transactions/TransactionHistory";
+import { Alert } from "@/components/ui/Alert";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SectionRefreshIndicator } from "@/components/ui/SectionRefreshIndicator";
@@ -27,6 +29,8 @@ export interface OfflineAccountDetailsAccount {
   name: string;
   opening_balance: number | string | null;
   currency: string | null;
+  /** Read from this device's copy; archived accounts take no new transactions. */
+  archived_at?: string | null;
 }
 
 function isTransactionType(value: string): value is TransactionType {
@@ -126,6 +130,7 @@ export function OfflineAccountDetails({
         name: account.name,
         opening_balance: account.opening_balance,
         currency: account.currency,
+        archived_at: account.archived_at ?? null,
       },
       transactions,
       categories,
@@ -167,6 +172,15 @@ export function OfflineAccountDetails({
 
   return (
     <div className="space-y-4 sm:space-y-6">
+      {account.archived_at && (
+        <Alert variant="info" title="Archived account">
+          Its balance and history still count on Home and Reports, but new transactions can&apos;t be added.{" "}
+          <Link href="/accounts/archived" className="font-semibold text-accent hover:text-accent-strong">
+            Unarchive it
+          </Link>{" "}
+          to use it again.
+        </Alert>
+      )}
       <section className="glass-strong glass-edge relative animate-rise overflow-hidden rounded-3xl p-4 sm:p-7">
         <div className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full bg-[radial-gradient(circle,var(--aurora-1),transparent_70%)]" />
 

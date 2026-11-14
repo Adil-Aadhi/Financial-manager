@@ -1,4 +1,5 @@
 import type { createClient } from "@/lib/supabase/server";
+import { ARCHIVED_ACCOUNT_ERROR, archivedAccountBlocks } from "@/lib/accounts";
 import { transactionFieldsError, type TransactionFields } from "@/lib/validation/rules";
 
 type ServerClient = Awaited<ReturnType<typeof createClient>>;
@@ -12,15 +13,18 @@ type ServerClient = Awaited<ReturnType<typeof createClient>>;
 export async function validateTransactionInput(
   input: TransactionFields,
   userId: string,
-  supabase: ServerClient
+  supabase: ServerClient,
+  /** The transaction's current account when editing: it may stay there even if archived. */
+  existingAccountId?: string | null
 ) {
   const fieldError = transactionFieldsError(input);
   if (fieldError) return fieldError;
 
   const [accountResult, categoryResult] = await Promise.all([
+    // "*" keeps working before the archive migration adds archived_at.
     supabase
       .from("accounts")
-      .select("id")
+      .select("*")
       .eq("id", input.accountId)
       .eq("user_id", userId)
       .is("deleted_at", null)
@@ -36,6 +40,9 @@ export async function validateTransactionInput(
 
   if (accountResult.error || !accountResult.data) {
     return "Choose one of your active accounts.";
+  }
+  if (archivedAccountBlocks(accountResult.data as { id: string; archived_at?: string | null }, existingAccountId)) {
+    return ARCHIVED_ACCOUNT_ERROR;
   }
   if (categoryResult.error || !categoryResult.data) {
     return "Choose an available category matching the transaction type.";

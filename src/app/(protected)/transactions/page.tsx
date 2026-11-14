@@ -67,6 +67,17 @@ export default async function TransactionsPage() {
     console.error("Error fetching accounts:", activeAccountsResult.error.message);
   }
 
+  // Archived accounts are hidden here (they still count on Home and Reports). A separate query
+  // keeps this page working before the archive migration, when archived_at doesn't exist.
+  const archivedResult = await supabase
+    .from("accounts")
+    .select("id")
+    .eq("user_id", user.id)
+    .is("deleted_at", null)
+    .not("archived_at", "is", null);
+  const archivedIds = new Set((archivedResult.error ? [] : archivedResult.data ?? []).map((row) => String(row.id)));
+  accounts = (accounts ?? []).filter((account) => !archivedIds.has(account.id));
+
   const accountIds = (accounts ?? []).map((account) => account.id);
   const totalsByAccount = new Map<string, { income: number; expense: number }>();
 
@@ -121,6 +132,7 @@ export default async function TransactionsPage() {
           serverAccounts={accountItems}
           fallbackCurrency={profile.default_currency}
           actionsEnabled={accountTrashReady}
+          serverArchivedCount={archivedIds.size}
         />
       </div>
     </>

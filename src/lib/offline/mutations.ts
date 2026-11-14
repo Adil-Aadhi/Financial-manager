@@ -2,7 +2,10 @@ import "client-only";
 
 import {
   ACCOUNT_GROUP_ERROR,
+  ARCHIVED_ACCOUNT_ERROR,
   DEFAULT_NEW_ACCOUNT_GROUP,
+  archivedAccountBlocks,
+  isAccountArchived,
   isAccountGroup,
   type AccountGroup,
 } from "@/lib/accounts";
@@ -322,7 +325,12 @@ export interface LocalTransactionInput {
   remark?: string;
 }
 
-async function validateTransaction(ownerId: string, input: LocalTransactionInput) {
+async function validateTransaction(
+  ownerId: string,
+  input: LocalTransactionInput,
+  /** The transaction's current account when editing: it may stay there even if archived. */
+  existingAccountId?: string | null
+) {
   const fieldError = transactionFieldsError(input);
   if (fieldError) return fieldError;
 
@@ -331,6 +339,7 @@ async function validateTransaction(ownerId: string, input: LocalTransactionInput
     offlineDb.categories.get([ownerId, input.categoryId]),
   ]);
   if (!account || account.deleted_at) return "Choose one of your active accounts.";
+  if (archivedAccountBlocks(account, existingAccountId)) return ARCHIVED_ACCOUNT_ERROR;
   if (!category || category.type !== input.type) {
     return "Choose an available category matching the transaction type.";
   }
@@ -415,7 +424,7 @@ export function updateTransactionLocally(ownerId: string, input: LocalTransactio
     const existing = await offlineDb.transactions.get([ownerId, input.transactionId]);
     if (!existing) throw new LocalMutationError("Transaction not found.");
     await refuseInstallmentManaged(ownerId, existing.id);
-    const invalid = await validateTransaction(ownerId, input);
+    const invalid = await validateTransaction(ownerId, input, existing.account_id);
     if (invalid) throw new LocalMutationError(invalid);
 
     const dateIntent: TransactionDateIntent =
@@ -465,7 +474,8 @@ export async function loadLocalTransactionOptions(ownerId: string): Promise<Tran
   ]);
   return {
     accounts: accounts
-      .filter((account) => !account.deleted_at)
+      // Archived accounts can't take new transactions, so the form doesn't offer them.
+      .filter((account) => !account.deleted_at && !isAccountArchived(account))
       .sort((left, right) => left.name.localeCompare(right.name))
       .map((account) => ({ id: account.id, name: account.name, currency: account.currency })),
     categories: categories
@@ -596,6 +606,20 @@ export function trashAccountLocally(ownerId: string, accountId: string, confirma
 
     const now = new Date().toISOString();
     const changes = { deleted_at: now, updated_at: now };
+    await offlineDb.accounts.update([ownerId, accountId], changes);
+    await enqueue(ownerId, "account", accountId, "UPDATE", changes, existing.updated_at ?? null);
+  });
+}
+
+/** Archive / unarchive on this device; the server stamps the real archived_at when it syncs. */
+export function setAccountArchivedLocally(ownerId: string, accountId: string, archived: boolean) {
+  return inLocalTransaction(async () => {
+    await requireLocalSnapshot(ownerId);
+    const existing = await offlineDb.accounts.get([ownerId, accountId]);
+    if (!existing || existing.deleted_at) throw new LocalMutationError("Account not found.");
+    if (isAccountArchived(existing) === archived) return;
+    const now = new Date().toISOString();
+    const changes = { archived_at: archived ? now : null, updated_at: now };
     await offlineDb.accounts.update([ownerId, accountId], changes);
     await enqueue(ownerId, "account", accountId, "UPDATE", changes, existing.updated_at ?? null);
   });
@@ -1379,6 +1403,9 @@ export function saveInstallmentPaymentLocally(ownerId: string, input: LocalInsta
       // New money movement needs an active account (the database applies the same rule).
       if (account.deleted_at && (input.transactionOrigin === "created" || existing?.account_id !== account.id)) {
         throw new LocalMutationError("Choose one of your active accounts.");
+      }
+      if (isAccountArchived(account) && (input.transactionOrigin === "created" || existing?.account_id !== account.id)) {
+        throw new LocalMutationError(ARCHIVED_ACCOUNT_ERROR);
       }
       const txId = input.transactionId!;
       const otherUse = await offlineDb.installmentPayments.where("[ownerId+transaction_id]").equals([ownerId, txId]).first();

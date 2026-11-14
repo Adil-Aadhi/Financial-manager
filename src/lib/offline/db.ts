@@ -34,6 +34,8 @@ export interface LocalAccount {
   account_group?: AccountGroup;
   /** Missing on legacy cached rows; read as true through normalizeIncludeInSummary(). */
   include_in_summary?: boolean;
+  /** Archived accounts are hidden from Transactions and take no new transactions. Not indexed. */
+  archived_at?: string | null;
   deleted_at: string | null;
   created_at: string;
   updated_at?: string | null;

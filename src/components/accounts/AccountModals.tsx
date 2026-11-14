@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useTransition } from "react";
-import { DollarSign, Landmark, Trash2 } from "lucide-react";
+import { Archive, DollarSign, Landmark, Trash2 } from "lucide-react";
+import { changeAccountArchived } from "@/components/accounts/archiveAccount";
 import {
   trashAccountAction,
   updateAccountAction,
@@ -49,6 +50,20 @@ export function EditAccountModal({
   const [error, setError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [isArchiving, startArchive] = useTransition();
+  const busy = isPending || isArchiving;
+
+  const handleArchive = () => {
+    setError(null);
+    startArchive(async () => {
+      const result = await changeAccountArchived(account.id, true);
+      if (!result.success) {
+        setError(result.error || "Unable to archive this account.");
+        return;
+      }
+      onClose();
+    });
+  };
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -122,7 +137,7 @@ export function EditAccountModal({
           }}
           error={nameError || undefined}
           leftIcon={<Landmark className="h-4 w-4" />}
-          disabled={isPending}
+          disabled={busy}
           required
           autoFocus
         />
@@ -135,11 +150,11 @@ export function EditAccountModal({
           value={openingAmount}
           onChange={(event) => setOpeningAmount(event.target.value)}
           leftIcon={<DollarSign className="h-4 w-4" />}
-          disabled={isPending}
+          disabled={busy}
           required
         />
 
-        <AccountGroupSelector value={accountGroup} onChange={setAccountGroup} disabled={isPending} />
+        <AccountGroupSelector value={accountGroup} onChange={setAccountGroup} disabled={busy} />
 
         <Checkbox
           id={`edit-account-summary-${account.id}`}
@@ -147,19 +162,41 @@ export function EditAccountModal({
           onChange={(event) => setIncludeInSummary(event.target.checked)}
           label="Include in Financial Summaries"
           description="Include this account in dashboard totals, consolidated reports and category breakdowns."
-          disabled={isPending}
+          disabled={busy}
         />
+
+        <div className="flex items-start gap-3 rounded-2xl border border-line bg-glass-hover p-3.5">
+          <div className="min-w-0 flex-1">
+            <p className="text-[13px] font-semibold text-fg">Archive account</p>
+            <p className="mt-0.5 text-xs leading-relaxed text-fg-subtle">
+              Hides it from Transactions and stops new transactions. Its balance still counts on Home
+              and Reports. Unarchive anytime from Archived accounts.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            leftIcon={<Archive className="h-3.5 w-3.5" />}
+            onClick={handleArchive}
+            isLoading={isArchiving}
+            disabled={busy}
+            className="shrink-0"
+          >
+            Archive
+          </Button>
+        </div>
 
         <div className="flex items-center justify-end gap-3 border-t border-line pt-3">
           <Button
             type="button"
             variant="ghost"
             onClick={onClose}
-            disabled={isPending}
+            disabled={busy}
           >
             Cancel
           </Button>
-          <Button type="submit" variant="primary" isLoading={isPending}>
+          <Button type="submit" variant="primary" isLoading={isPending} disabled={busy}>
             {isPending ? "Saving…" : "Save Changes"}
           </Button>
         </div>

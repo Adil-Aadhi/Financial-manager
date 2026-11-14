@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { INSTALLMENT_MANAGED_MESSAGE } from "@/lib/installments";
 import { isInstallmentManagedTransaction, validateTransactionInput } from "@/lib/server/validation";
+import { isAccountArchived } from "@/lib/accounts";
 import {
   isTransactionDateChange,
   type TransactionFormOptions,
@@ -58,9 +59,10 @@ export async function getTransactionFormOptionsAction(): Promise<TransactionOpti
   if (!user) return { success: false, error: "You must be signed in." };
 
   const [accountsResult, categoriesResult] = await Promise.all([
+    // "*" keeps working before the archive migration adds archived_at.
     supabase
       .from("accounts")
-      .select("id, name, currency")
+      .select("*")
       .eq("user_id", user.id)
       .is("deleted_at", null)
       .order("name"),
@@ -83,7 +85,10 @@ export async function getTransactionFormOptionsAction(): Promise<TransactionOpti
   return {
     success: true,
     options: {
-      accounts: accountsResult.data ?? [],
+      // Archived accounts can't take new transactions, so they aren't offered.
+      accounts: ((accountsResult.data ?? []) as { id: string; name: string; currency: string | null; archived_at?: string | null }[])
+        .filter((account) => !isAccountArchived(account))
+        .map(({ id, name, currency }) => ({ id, name, currency })),
       categories: (categoriesResult.data ?? []).flatMap((category) =>
         isTransactionType(category.type)
           ? [{ ...category, type: category.type }]
@@ -154,7 +159,7 @@ export async function updateTransactionAction(
   if (managed === "error") return { success: false, error: "Unable to update this transaction." };
   if (managed) return { success: false, error: INSTALLMENT_MANAGED_MESSAGE };
 
-  const validationError = await validateTransactionInput(input, user.id, supabase);
+  const validationError = await validateTransactionInput(input, user.id, supabase, String(existing.account_id));
   if (validationError) return { success: false, error: validationError };
 
   const changes: Record<string, string | number | null> = {

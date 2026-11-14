@@ -2,7 +2,8 @@
 
 import React, { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Landmark } from "lucide-react";
+import Link from "next/link";
+import { Archive, ChevronRight, Landmark } from "lucide-react";
 import { AccountList, type AccountListItem } from "@/components/accounts/AccountList";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -10,6 +11,7 @@ import { SectionRefreshIndicator } from "@/components/ui/SectionRefreshIndicator
 import {
   ACCOUNT_GROUP_LABELS,
   ACCOUNT_GROUPS,
+  isAccountArchived,
   normalizeAccountGroup,
   type AccountGroup,
 } from "@/lib/accounts";
@@ -26,11 +28,13 @@ export function OfflineAccountList({
   serverAccounts,
   fallbackCurrency,
   actionsEnabled,
+  serverArchivedCount = 0,
 }: {
   ownerId: string;
   serverAccounts: AccountListItem[];
   fallbackCurrency: SupportedCurrency;
   actionsEnabled: boolean;
+  serverArchivedCount?: number;
 }) {
   const [activeGroup, setActiveGroup] = useState<AccountGroup>("primary");
   const [hasCustomOrder, setHasCustomOrder] = useState(false);
@@ -66,8 +70,10 @@ export function OfflineAccountList({
       totalsByAccount.set(transaction.account_id, current);
     }
 
-    return accounts
-      .filter((account) => !account.deleted_at)
+    const archivedCount = accounts.filter((account) => !account.deleted_at && isAccountArchived(account)).length;
+    const list = accounts
+      // Archived accounts are hidden here; they're listed on /accounts/archived.
+      .filter((account) => !account.deleted_at && !isAccountArchived(account))
       .sort((left, right) => right.created_at.localeCompare(left.created_at))
       .map<AccountListItem>((account) => ({
         id: account.id,
@@ -79,10 +85,12 @@ export function OfflineAccountList({
         total_income: totalsByAccount.get(account.id)?.income ?? 0,
         total_expense: totalsByAccount.get(account.id)?.expense ?? 0,
       }));
+    return { list, archivedCount };
   }, [ownerId]);
   useLocalContentMark(localAccounts != null); // TEMPORARY perf (Step 3 Phase 0)
 
-  const accounts = localAccounts ?? serverAccounts;
+  const accounts = localAccounts?.list ?? serverAccounts;
+  const archivedCount = localAccounts?.archivedCount ?? serverArchivedCount;
   // Every account has exactly one group (missing = General), so each appears in exactly one tab.
   const counts: Record<AccountGroup, number> = { primary: 0, general: 0 };
   for (const account of accounts) counts[normalizeAccountGroup(account.account_group)] += 1;
@@ -174,6 +182,20 @@ export function OfflineAccountList({
           )}
         </div>
       </Card>
+
+      {archivedCount > 0 && (
+        <Link
+          href="/accounts/archived"
+          className="flex items-center justify-between gap-3 rounded-2xl border border-line bg-glass-hover px-4 py-3 text-sm transition-colors hover:border-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+        >
+          <span className="flex items-center gap-2.5 text-fg-muted">
+            <Archive className="h-4 w-4 text-fg-subtle" aria-hidden="true" />
+            Archived accounts
+            <span className="rounded-full bg-glass-input px-1.5 py-px font-mono text-[10px] text-fg-subtle">{archivedCount}</span>
+          </span>
+          <ChevronRight className="h-4 w-4 text-fg-subtle" aria-hidden="true" />
+        </Link>
+      )}
     </>
   );
 }

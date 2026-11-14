@@ -66,6 +66,7 @@ interface AccountRow {
   currency: string | null;
   account_group?: string | null;
   include_in_summary?: boolean | null;
+  archived_at?: string | null;
   deleted_at?: string | null;
   created_at: string;
   updated_at?: string | null;
@@ -77,7 +78,10 @@ interface AccountRow {
  * account-group regression tests check the downloaded rows against this list.
  */
 export const ACCOUNT_SNAPSHOT_COLUMNS =
-  "id, user_id, name, account_type, opening_balance, currency, account_group, include_in_summary, deleted_at, created_at, updated_at";
+  "id, user_id, name, account_type, opening_balance, currency, account_group, include_in_summary, archived_at, deleted_at, created_at, updated_at";
+/** The same columns before the account-archive migration (no archived_at yet). */
+const PRE_ARCHIVE_ACCOUNT_COLUMNS =
+  "id, user_id, name, account_type, opening_balance, currency, account_group, include_in_summary, deleted_at, created_at, updated_at" as const;
 
 interface CategoryRow {
   id: string;
@@ -236,9 +240,26 @@ async function downloadSnapshot(user: User) {
         .order("id")
         .range(from, to)
     );
+  const fetchPreArchiveAccounts = () =>
+    fetchEveryPage<AccountRow>("Accounts", (from, to) =>
+      supabase
+        .from("accounts")
+        .select(PRE_ARCHIVE_ACCOUNT_COLUMNS)
+        .eq("user_id", user.id)
+        .order("id")
+        .range(from, to)
+    );
   const accountsPromise = fetchAccounts().catch(
     async (error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
+      // Before the archive migration: every account is unarchived.
+      if (message.includes("archived_at")) {
+        return fetchPreArchiveAccounts().catch(async (inner: unknown) => {
+          const innerMessage = inner instanceof Error ? inner.message : String(inner);
+          if (!innerMessage.includes("include_in_summary")) throw inner;
+          return fetchLegacyAccounts();
+        });
+      }
       if (!message.includes("include_in_summary")) throw error;
       return fetchLegacyAccounts();
     }
@@ -545,6 +566,7 @@ async function commitSnapshot(user: User, snapshot: Awaited<ReturnType<typeof do
             ...account,
             account_group: normalizeAccountGroup(account.account_group),
             include_in_summary: normalizeIncludeInSummary(account.include_in_summary),
+            archived_at: account.archived_at ?? null,
             deleted_at: account.deleted_at ?? null,
           })),
           categories: snapshot.categories.map((category) => ({ ownerId, ...category })),
