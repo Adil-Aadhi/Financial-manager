@@ -1,7 +1,8 @@
 "use client";
 
 import { useLiveQuery } from "dexie-react-hooks";
-import { CalendarSearch } from "lucide-react";
+import Link from "next/link";
+import { CalendarSearch, Trash2 } from "lucide-react";
 import { AccountReport } from "@/components/reports/AccountReport";
 import { CategoryBreakdown } from "@/components/reports/CategoryBreakdown";
 import { MonthlyComparison } from "@/components/reports/MonthlyComparison";
@@ -111,6 +112,19 @@ export function OfflineReportContent({
     >
       <div className="space-y-4 sm:space-y-5">
         {range.notice && <Alert variant="warning">{range.notice}</Alert>}
+        {report.trashedExcluded > 0 && (
+          <p className="flex items-center gap-1.5 text-xs text-fg-subtle">
+            <Trash2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>
+              {report.trashedExcluded === 1
+                ? "1 account in Trash isn't included. Restoring it brings its transactions back."
+                : `${report.trashedExcluded} accounts in Trash aren't included. Restoring them brings their transactions back.`}{" "}
+              <Link href="/trash" className="font-medium text-accent hover:text-accent-strong">
+                Open Trash
+              </Link>
+            </span>
+          </p>
+        )}
         {report.count === 0 ? (
           <Card>
             <EmptyState

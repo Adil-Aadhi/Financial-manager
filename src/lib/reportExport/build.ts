@@ -41,8 +41,8 @@ export type AccountSelection = { ok: true; accounts: ExportAccount[] } | { ok: f
  * Which accounts a configuration covers.
  * - single: exactly the chosen account (it may be in Trash or excluded from summary).
  * - combined / separate: the accounts the Reports page totals (include_in_summary), or all of
- *   them when `includeExcluded`. Accounts in Trash are included only when they have activity in
- *   the period, matching the Reports page, which still counts their history.
+ *   them when `includeExcluded`. Accounts in Trash are never included, matching the Reports page
+ *   and Home; restoring an account brings it back.
  */
 export function selectAccounts(
   dataset: Pick<ReportDataset, "accounts" | "transactions">,
@@ -54,14 +54,10 @@ export function selectAccounts(
     return { ok: true, accounts: [account] };
   }
 
-  const active = new Set<string>();
-  for (const tx of dataset.transactions) {
-    if (dateInPeriod(tx.date, config.period)) active.add(tx.accountId);
-  }
   const accounts = dataset.accounts
+    .filter((account) => !account.trashed)
     .filter((account) => config.includeExcluded || account.includeInSummary)
-    .filter((account) => !account.trashed || active.has(account.id))
-    .sort((a, b) => Number(a.trashed) - Number(b.trashed) || a.name.localeCompare(b.name));
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   if (accounts.length === 0) return { ok: false, error: "There are no accounts to include in this report." };
   return { ok: true, accounts };

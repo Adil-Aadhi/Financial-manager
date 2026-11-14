@@ -149,6 +149,35 @@ describe("financial summary account inclusion", () => {
     );
   });
 
+  it("leaves accounts in Trash out of every report section, and restoring brings them back", () => {
+    const rows: ReportRollupRow[] = [
+      rollup("active", "income", 100, 1, "salary", "2026-03-01"),
+      rollup("binned", "expense", 900, 2, "food", "2026-03-01"),
+      rollup("binned-usd", "income", 50, 1, "salary", "2026-03-01"),
+    ];
+    const categories = [
+      { id: "salary", name: "Salary", icon: "wallet" },
+      { id: "food", name: "Food", icon: "utensils" },
+    ];
+    const accounts = (trashed: boolean) => [
+      { id: "active", name: "SBI", currency: "INR", trashed: false, include_in_summary: true },
+      { id: "binned", name: "Old Card", currency: "INR", trashed, include_in_summary: true },
+      { id: "binned-usd", name: "US Wallet", currency: "USD", trashed, include_in_summary: true },
+    ];
+
+    const report = buildReport(rows, accounts(true), categories, range, "INR", "INR");
+    expect(report).toMatchObject({ income: 100, expense: 0, net: 100, count: 1, trashedExcluded: 2 });
+    expect(report.expenseCategories).toEqual([]);
+    expect(report.accounts.map((account) => account.id)).toEqual(["active"]);
+    // A currency used only by a trashed account doesn't appear in the switcher.
+    expect(report.currencies).toEqual(["INR"]);
+    expect(report.months.find((month) => month.key === "2026-03")).toMatchObject({ income: 100, expense: 0 });
+
+    const restored = buildReport(rows, accounts(false), categories, range, "INR", "INR");
+    expect(restored).toMatchObject({ income: 100, expense: 900, count: 3, trashedExcluded: 0 });
+    expect(restored.currencies).toEqual(["INR", "USD"]);
+  });
+
   it("keeps legacy report rows included when the setting is absent", () => {
     const report = buildReport(
       [rollup("legacy", "income", 75, 1, "salary", "2026-12-01")],

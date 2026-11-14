@@ -217,8 +217,14 @@ describe("financial calculations", () => {
     const withExcluded = buildExportReport(dataset(nov), config(nov, { includeExcluded: true }));
     expect(withExcluded.summaries.map((s) => s.currency)).toEqual(["INR", "USD"]);
     expect(withExcluded.summaries[1]).toMatchObject({ income: 25, opening: 10, closing: 35 });
-    // Old Card is in Trash with no activity in November, so it is left out.
-    expect(withExcluded.statements.some((s) => s.account.id === "a-old")).toBe(false);
+    // Old Card is in Trash: left out even when it has activity in the period (matches Reports/Home).
+    const trashedActivity = [...TXS, tx({ account_id: "a-old", type: "expense", amount: 700, transaction_date: "2026-11-05" })];
+    for (const mode of ["combined", "separate"] as const) {
+      const r = buildExportReport(dataset(nov, trashedActivity), config(nov, { accountMode: mode, includeExcluded: true }));
+      expect(r.statements.some((s) => s.account.id === "a-old")).toBe(false);
+      expect(r.rows.some((row) => row.tx.accountId === "a-old")).toBe(false);
+      expect(r.summaries[0].expense).toBe(1300);
+    }
   });
 
   it("17. individual account export contains only that account", () => {

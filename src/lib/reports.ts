@@ -211,6 +211,11 @@ export interface ReportData {
   incomeCategories: CategoryTotal[];
   months: MonthTotal[];
   accounts: AccountTotal[];
+  /**
+   * Accounts in Trash that had activity in the range. Their transactions are left out of every
+   * section (like Home), and come back automatically if the account is restored.
+   */
+  trashedExcluded: number;
 }
 
 const cents = (value: number) => Math.round(value * 100) / 100;
@@ -228,9 +233,11 @@ function rankCategories(map: Map<string, Omit<CategoryTotal, "percent">>, total:
 /**
  * Build every report section from rollup rows for ONE currency.
  * Rows from accounts in other currencies are excluded (never converted).
+ * Rows from accounts in Trash are excluded entirely, matching Home; restoring the account
+ * brings them back because nothing is deleted until the Trash retention period ends.
  */
 export function buildReport(
-  rows: ReportRollupRow[],
+  allRows: ReportRollupRow[],
   accounts: ReportAccountMeta[],
   categories: ReportCategoryMeta[],
   range: Pick<ReportRange, "start" | "end">,
@@ -240,6 +247,13 @@ export function buildReport(
   const accountById = new Map(accounts.map((account) => [account.id, account]));
   const categoryById = new Map(categories.map((category) => [category.id, category]));
   const currencyOf = (accountId: string) => accountById.get(accountId)?.currency || defaultCurrency;
+
+  const trashedWithActivity = new Set<string>();
+  const rows = allRows.filter((row) => {
+    if (!accountById.get(row.account_id)?.trashed) return true;
+    if (row.type === "income" || row.type === "expense") trashedWithActivity.add(row.account_id);
+    return false;
+  });
 
   const currencies = [...new Set(rows.map((row) => currencyOf(row.account_id)))].sort();
   const currency =
@@ -346,5 +360,6 @@ export function buildReport(
         net: cents(account.income - account.expense),
       }))
       .sort((a, b) => Number(a.trashed) - Number(b.trashed) || b.income + b.expense - (a.income + a.expense)),
+    trashedExcluded: trashedWithActivity.size,
   };
 }
