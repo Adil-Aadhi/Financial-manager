@@ -5,10 +5,16 @@ import { runSyncBatch } from "@/lib/server/syncApply";
 import { offlineDb, type OutboxEntry } from "@/lib/offline/db";
 import {
   createAccountLocally,
+  createTransactionLocally,
+  deleteTransactionLocally,
+  loadLocalTransactionOptions,
   restoreAccountLocally,
+  setAccountArchivedLocally,
   trashAccountLocally,
   updateAccountLocally,
+  updateTransactionLocally,
 } from "@/lib/offline/mutations";
+import { ARCHIVED_ACCOUNT_ERROR, archivedAccountBlocks, isAccountArchived } from "@/lib/accounts";
 import { overlayOutbox } from "@/lib/offline/snapshotOverlay";
 import type { SyncOperation } from "@/lib/sync/types";
 
@@ -662,5 +668,124 @@ describe("account groups: Trash and restore", () => {
     const response = await syncAll(store);
     expect(response.results).toMatchObject([{ status: "rejected" }]);
     expect(store.rows("accounts").get(accountId)?.account_group).toBe("general");
+  });
+});
+
+describe("account archive", () => {
+  const income = {
+    type: "income" as const,
+    amount: 7,
+    accountId,
+    categoryId,
+    transactionDate: "2026-11-02",
+    transactionTime: "10:00",
+  };
+
+  /** Server with the archive migration applied (archived_at exists, null). */
+  function seedArchiveServer() {
+    const store = seedServer();
+    store.rows("accounts").get(accountId)!.archived_at = null;
+    return store;
+  }
+
+  it("helpers: only a new account for a transaction is blocked by archiving", () => {
+    expect(isAccountArchived({ archived_at: null })).toBe(false);
+    expect(isAccountArchived({})).toBe(false);
+    expect(isAccountArchived({ archived_at: BASE })).toBe(true);
+    expect(archivedAccountBlocks({ id: "a", archived_at: BASE })).toBe(true);
+    expect(archivedAccountBlocks({ id: "a", archived_at: BASE }, "a")).toBe(false);
+    expect(archivedAccountBlocks({ id: "a", archived_at: BASE }, "b")).toBe(true);
+    expect(archivedAccountBlocks({ id: "a", archived_at: null }, "b")).toBe(false);
+  });
+
+  it("offline: hides the account from the add form, blocks adds, still allows editing its history", async () => {
+    await setAccountArchivedLocally(ownerId, accountId, true);
+    expect(isAccountArchived(await offlineDb.accounts.get([ownerId, accountId]))).toBe(true);
+
+    const options = await loadLocalTransactionOptions(ownerId);
+    expect(options.accounts.map((account) => account.id)).not.toContain(accountId);
+
+    await expect(createTransactionLocally(ownerId, income)).rejects.toThrow(ARCHIVED_ACCOUNT_ERROR);
+    // The existing transaction in the archived account can still be corrected.
+    await expect(
+      updateTransactionLocally(ownerId, { ...income, transactionId, amount: 6 })
+    ).resolves.toBeUndefined();
+    expect(Number((await offlineDb.transactions.get([ownerId, transactionId]))?.amount)).toBe(6);
+  });
+
+  it("still deletes a transaction from an archived account, locally and on the server", async () => {
+    const store = seedArchiveServer();
+    store.rows("accounts").get(accountId)!.archived_at = BASE;
+    await setAccountArchivedLocally(ownerId, accountId, true);
+    await offlineDb.outbox.clear();
+    await deleteTransactionLocally(ownerId, transactionId);
+    expect(await offlineDb.transactions.get([ownerId, transactionId])).toBeUndefined();
+    const response = await syncAll(store);
+    expect(response.results).toMatchObject([{ status: "applied" }]);
+    expect(store.rows("transactions").has(transactionId)).toBe(false);
+  });
+
+  it("blocks moving an existing transaction into an archived account", async () => {
+    const other = "55555555-5555-4555-8555-555555555555";
+    await offlineDb.accounts.put({
+      ownerId,
+      id: other,
+      user_id: ownerId,
+      name: "Old wallet",
+      account_type: "other",
+      opening_balance: 0,
+      currency: "INR",
+      archived_at: BASE,
+      deleted_at: null,
+      created_at: BASE,
+      updated_at: BASE,
+    });
+    await expect(
+      updateTransactionLocally(ownerId, { ...income, transactionId, accountId: other, amount: 5 })
+    ).rejects.toThrow(ARCHIVED_ACCOUNT_ERROR);
+  });
+
+  it("syncs archive and unarchive; the server stamps its own time and the snapshot keeps it", async () => {
+    const store = seedArchiveServer();
+    await ensureOfflineBootstrap(ownerId, true);
+    await setAccountArchivedLocally(ownerId, accountId, true);
+    const response = await syncAll(store);
+    expect(response.results).toMatchObject([{ status: "applied" }]);
+    expect(store.rows("accounts").get(accountId)?.archived_at).toEqual(expect.any(String));
+
+    await ensureOfflineBootstrap(ownerId, true);
+    expect(isAccountArchived(await offlineDb.accounts.get([ownerId, accountId]))).toBe(true);
+    // Balance inputs are untouched: still counted everywhere except the Transactions page.
+    expect(await offlineDb.transactions.get([ownerId, transactionId])).toBeTruthy();
+
+    await setAccountArchivedLocally(ownerId, accountId, false);
+    await syncAll(store);
+    expect(store.rows("accounts").get(accountId)?.archived_at).toBeNull();
+    await ensureOfflineBootstrap(ownerId, true);
+    await expect(createTransactionLocally(ownerId, income)).resolves.toBeUndefined();
+  });
+
+  it("the server rejects a queued add for an account archived on another device", async () => {
+    const store = seedArchiveServer();
+    await createTransactionLocally(ownerId, income);
+    store.rows("accounts").get(accountId)!.archived_at = BASE;
+    const response = await syncAll(store);
+    expect(response.results[0]).toMatchObject({ status: "rejected", error: ARCHIVED_ACCOUNT_ERROR });
+  });
+
+  it("rejects archiving an account that is in Trash on the server", async () => {
+    const store = seedArchiveServer();
+    await setAccountArchivedLocally(ownerId, accountId, true);
+    store.rows("accounts").get(accountId)!.deleted_at = new Date().toISOString();
+    const response = await syncAll(store);
+    expect(response.results).toMatchObject([{ status: "rejected" }]);
+    expect(store.rows("accounts").get(accountId)?.archived_at).toBeNull();
+  });
+
+  it("explains that the migration is needed when the server has no archived_at column", async () => {
+    const store = seedServer(); // no archived_at key, like the database before the migration
+    await setAccountArchivedLocally(ownerId, accountId, true);
+    const response = await syncAll(store);
+    expect(response.results[0]).toMatchObject({ status: "rejected", error: expect.stringMatching(/archive database migration/) });
   });
 });

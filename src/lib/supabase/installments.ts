@@ -17,6 +17,8 @@ export interface InstallmentAccountOption {
   name: string;
   currency: string | null;
   deleted_at: string | null;
+  /** Archived accounts can't take new payments (missing before the archive migration). */
+  archived_at?: string | null;
 }
 
 export interface InstallmentTransactionOption {
@@ -71,7 +73,8 @@ export async function getInstallmentsServerData(supabase: ServerClient, userId: 
   const referenced = [...new Set(payments.map((payment) => payment.transaction_id).filter((id): id is string => Boolean(id)))];
   const transactionColumns = "id, account_id, category_id, type, amount, description, transaction_date, transaction_time";
   const [accountsResult, recentResult, referencedResult, categoryResult] = await Promise.all([
-    supabase.from("accounts").select("id, name, currency, deleted_at").eq("user_id", userId).order("name"),
+    // "*" keeps working before the archive migration adds archived_at.
+    supabase.from("accounts").select("*").eq("user_id", userId).order("name"),
     supabase
       .from("transactions")
       .select(transactionColumns)
@@ -94,7 +97,13 @@ export async function getInstallmentsServerData(supabase: ServerClient, userId: 
     available: true,
     plans: (plansResult.data ?? []) as InstallmentPlanRecord[],
     payments,
-    accounts: (accountsResult.data ?? []) as InstallmentAccountOption[],
+    accounts: ((accountsResult.data ?? []) as InstallmentAccountOption[]).map(({ id, name, currency, deleted_at, archived_at }) => ({
+      id,
+      name,
+      currency,
+      deleted_at,
+      archived_at: archived_at ?? null,
+    })),
     transactions: [...transactions.values()],
     categoryAvailable: ((categoryResult.data ?? []) as Array<{ name: string }>).some(
       (category) => category.name.trim().toLowerCase() === INSTALLMENT_CATEGORY_NAME.toLowerCase()

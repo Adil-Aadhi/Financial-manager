@@ -286,7 +286,9 @@ export function QuickTransactionModal({
         )}
 
         {isAccountDetailPage && !isLoadingOptions && !isSelectedAccountActive && (
-          <Alert variant="error">This account is no longer active or available.</Alert>
+          <Alert variant="error">
+            This account is archived or no longer active, so new transactions can&apos;t be added to it.
+          </Alert>
         )}
 
         {/* Type switch */}

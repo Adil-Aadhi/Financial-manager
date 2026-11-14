@@ -35,6 +35,7 @@ export async function describeChange(entry: OutboxEntry): Promise<string> {
       const stored = await offlineDb.accounts.get([entry.ownerId, entry.entityId]);
       const name = String(payload.name ?? stored?.name ?? "an account");
       if (entry.op === "CREATE") return `Added account “${name}”`;
+      if ("archived_at" in payload) return payload.archived_at === null ? `Unarchived account “${name}”` : `Archived account “${name}”`;
       if ("deleted_at" in payload) return payload.deleted_at === null ? `Restored account “${name}”` : `Moved account “${name}” to Trash`;
       return `Edited account “${name}”`;
     }

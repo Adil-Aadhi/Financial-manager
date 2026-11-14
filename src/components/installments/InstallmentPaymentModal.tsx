@@ -79,7 +79,8 @@ export function InstallmentPaymentModal({
   const router = useRouter();
   const online = useOnlineStatus();
   const existing = target.payment;
-  const activeAccounts = useMemo(() => accounts.filter((account) => !account.deleted_at), [accounts]);
+  // Trashed and archived accounts can't take new payments.
+  const activeAccounts = useMemo(() => accounts.filter((account) => !account.deleted_at && !account.archived_at), [accounts]);
   const accountName = (id: string | null) => accounts.find((account) => account.id === id)?.name ?? "Unknown account";
 
   // Stable ids for this confirmation: a retried save sends the same payment and transaction ids,

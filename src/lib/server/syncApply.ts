@@ -291,7 +291,12 @@ function sameTransaction(a: ReturnType<typeof transactionColumns>, b: ReturnType
   );
 }
 
-async function validateTransactionColumns(supabase: ServerClient, userId: string, cols: ReturnType<typeof transactionColumns>) {
+async function validateTransactionColumns(
+  supabase: ServerClient,
+  userId: string,
+  cols: ReturnType<typeof transactionColumns>,
+  existingAccountId?: string | null
+) {
   return validateTransactionInput(
     {
       type: cols.type,
@@ -303,7 +308,8 @@ async function validateTransactionColumns(supabase: ServerClient, userId: string
       remark: cols.description ?? "",
     },
     userId,
-    supabase
+    supabase,
+    existingAccountId
   );
 }
 
@@ -365,7 +371,7 @@ async function applyTransaction(supabase: ServerClient, userId: string, op: Sync
     if (managedUpdate) return managedUpdate;
     const lww = lastWriteWins(row.updated_at, op.baseUpdatedAt, editedAt);
     if (!lww.apply) return done(op, { conflict: lww.conflict, serverUpdatedAt: (row.updated_at as string) ?? null });
-    const invalid = await validateTransactionColumns(supabase, userId, next);
+    const invalid = await validateTransactionColumns(supabase, userId, next, current.account_id);
     if (invalid) return rejected(op, invalid);
     const changes: Row = { ...next, updated_at: editedAt };
     if (current.transaction_date === next.transaction_date) delete changes.transaction_date;
@@ -394,8 +400,8 @@ async function applyTransaction(supabase: ServerClient, userId: string, op: Sync
 
 /* ------------------------------------------------------------------ accounts */
 
-const ACCOUNT_SELECT =
-  "id, user_id, name, opening_balance, account_group, include_in_summary, deleted_at, updated_at";
+// "*" keeps account sync working before the archive migration adds archived_at.
+const ACCOUNT_SELECT = "*";
 
 async function applyAccount(supabase: ServerClient, userId: string, op: SyncOperation, editedAt: string, now: Date): Promise<SyncOpResult> {
   const { row, error } = await loadOwnRow(supabase, "accounts", ACCOUNT_SELECT, userId, op.entityId);
@@ -449,6 +455,7 @@ async function applyAccount(supabase: ServerClient, userId: string, op: SyncOper
     "opening_balance",
     "account_group",
     "include_in_summary",
+    "archived_at",
     "deleted_at",
   ]);
   if (payload.account_group !== undefined && !isAccountGroup(payload.account_group)) {
@@ -460,6 +467,13 @@ async function applyAccount(supabase: ServerClient, userId: string, op: SyncOper
   const wantsTrashChange = Object.prototype.hasOwnProperty.call(payload, "deleted_at");
   const wantTrashed = wantsTrashChange ? payload.deleted_at !== null : row.deleted_at !== null;
   const isTrashed = row.deleted_at !== null;
+  // Archive state: the device's timestamp is never stored; only archived vs not matters.
+  const wantsArchiveChange = Object.prototype.hasOwnProperty.call(payload, "archived_at");
+  const isArchived = row.archived_at !== null && row.archived_at !== undefined;
+  const wantArchived = wantsArchiveChange ? payload.archived_at !== null : isArchived;
+  if (wantsArchiveChange && !Object.prototype.hasOwnProperty.call(row, "archived_at")) {
+    return rejected(op, "Archiving needs the account-archive database migration.");
+  }
   const name = payload.name !== undefined ? String(payload.name).trim() : String(row.name);
   const opening = payload.opening_balance !== undefined ? Number(payload.opening_balance) : Number(row.opening_balance);
   // The group is part of "already applied": a group-only change must never be skipped as a no-op.
@@ -478,7 +492,8 @@ async function applyAccount(supabase: ServerClient, userId: string, op: SyncOper
     Number(opening) === Number(row.opening_balance) &&
     !groupChanged &&
     !summaryInclusionChanged &&
-    wantTrashed === isTrashed
+    wantTrashed === isTrashed &&
+    wantArchived === isArchived
   ) {
     return already(op, (row.updated_at as string) ?? null);
   }
@@ -492,7 +507,7 @@ async function applyAccount(supabase: ServerClient, userId: string, op: SyncOper
     Number(opening) !== Number(row.opening_balance) ||
     groupChanged ||
     summaryInclusionChanged;
-  if (fieldsChanged && isTrashed && !(wantsTrashChange && !wantTrashed)) {
+  if ((fieldsChanged || wantArchived !== isArchived) && isTrashed && !(wantsTrashChange && !wantTrashed)) {
     return rejected(op, "This account is in Trash on the server. Restore it before editing.");
   }
   if (isTrashed && !wantTrashed) {
@@ -508,6 +523,8 @@ async function applyAccount(supabase: ServerClient, userId: string, op: SyncOper
   if (groupChanged) changes.account_group = group;
   if (summaryInclusionChanged) changes.include_in_summary = includeInSummary;
   if (wantTrashed !== isTrashed) changes.deleted_at = wantTrashed ? now.toISOString() : null;
+  // The protect_account_archived_at trigger stamps the real archive time.
+  if (wantArchived !== isArchived) changes.archived_at = wantArchived ? now.toISOString() : null;
   const update = await supabase
     .from("accounts")
     .update(changes)

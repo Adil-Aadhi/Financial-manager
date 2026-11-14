@@ -36,7 +36,13 @@ export function useInstallmentsData(ownerId: string, server: InstallmentsServerD
       plans,
       payments,
       accounts: accounts
-        .map((account) => ({ id: account.id, name: account.name, currency: account.currency, deleted_at: account.deleted_at }))
+        .map((account) => ({
+          id: account.id,
+          name: account.name,
+          currency: account.currency,
+          deleted_at: account.deleted_at,
+          archived_at: account.archived_at ?? null,
+        }))
         .sort((a, b) => a.name.localeCompare(b.name)),
       transactions: transactions.map((transaction) => ({
         id: transaction.id,

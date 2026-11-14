@@ -39,3 +39,27 @@ export {
 } from "@/lib/accountSummary";
 
 export const ACCOUNT_GROUP_ERROR = "Choose Primary or General for this account.";
+
+// ------------------------------------------------------------------ archive --
+
+/**
+ * Archived accounts (accounts.archived_at) are hidden from the Transactions page and can't take
+ * new transactions. Their balance and history still count on Home, Reports and exports.
+ * Missing on rows saved before the archive migration = not archived.
+ */
+export function isAccountArchived(account: { archived_at?: string | null } | null | undefined) {
+  return Boolean(account?.archived_at);
+}
+
+export const ARCHIVED_ACCOUNT_ERROR = "This account is archived. Unarchive it to add transactions.";
+
+/**
+ * Whether a transaction may be saved to this account: an unarchived account always, an archived
+ * one only when the transaction already belonged to it (editing existing history is allowed).
+ */
+export function archivedAccountBlocks(
+  account: { id: string; archived_at?: string | null },
+  existingAccountId?: string | null
+) {
+  return isAccountArchived(account) && account.id !== existingAccountId;
+}
